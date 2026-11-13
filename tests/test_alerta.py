@@ -59,3 +59,20 @@ def test_recarga_conserva_los_parametros():
     """Las apps recargan el módulo en cada ejecución (importlib.reload): tiene que seguir encontrando los parámetros."""
     antes = al.AlertaLolmu().p["modelos"]
     assert importlib.reload(al).AlertaLolmu().p["modelos"] == antes
+
+
+@pytest.mark.parametrize("inf,densidad", [("Baja", 200), ("Media", 1000), ("Alta", 4000)])
+def test_residual_con_infestacion_del_lote(inf, densidad):
+    sin = al.riesgo_residual(pd.Timestamp("2026-06-01"))
+    con = al.riesgo_residual(pd.Timestamp("2026-06-01"), infestacion=inf)
+    assert con["infestacion"] == inf and con["densidad_lote"] == densidad
+    assert con["residual"]["mediana"] == sin["residual"]["mediana"]  # misma fracción de la campaña
+    assert con["residual"]["plm2"] == pytest.approx(sin["residual"]["mediana"] * densidad)
+    assert con["residual"]["nivel"] == al.nivel_residual(con["residual"]["plm2"], al.NIVELES_PLM2)
+
+
+def test_infestacion_ordena_el_riesgo():
+    orden = ["Bajo", "Medio", "Alto", "Muy alto"]
+    niv = [orden.index(al.riesgo_residual(pd.Timestamp("2026-07-01"), infestacion=i)["residual"]["nivel"]) for i in ("Baja", "Media", "Alta")]
+    assert niv == sorted(niv)
+    assert al.riesgo_residual(pd.Timestamp("2026-06-01"), infestacion=None)["infestacion"] is None

@@ -5,7 +5,7 @@ Balcarce, Pergamino y San Pedro). Reúne el código que antes se copiaba a mano 
 
 | Módulo | Contenido |
 |---|---|
-| `lolium_comun.alerta_lolmu` | Alerta validada de grandes flujos (≥ 5 % de la campaña en 7 días) por niveles de información, flujos tardíos (1/05–30/06), recorridas de julio a septiembre y riesgo para el residual a la siembra (ventana de −10 a +45 días, niveles en pl/m²) |
+| `lolium_comun.alerta_lolmu` | Alerta validada de grandes flujos (≥ 5 % de la campaña en 7 días) por niveles de información, flujos tardíos (1/05–30/06), recorridas de julio a septiembre y riesgo para el residual a la siembra (ventana de −10 a +45 días, niveles en pl/m², con la densidad del sitio o la infestación del lote informada: baja ≈ 200, media ≈ 1.000, alta ≈ 4.000 pl/m² por campaña) |
 | `lolium_comun.visualizacion_alerta_lolmu` | Tarjetas, recuadros, gráficos y reporte Excel de la alerta en Streamlit |
 | `lolium_comun.acceso_predweem` | Control de acceso (ingreso con Google y usuarios aprobados) |
 
@@ -53,3 +53,10 @@ apps lo usen de esta forma. Si se privatiza, hay que dar acceso a pip con un tok
 ## Propiedad intelectual
 
 Ver `COPYRIGHT.md`. Copyright © 2026 Guillermo R. Chantre / PREDWEEM. Todos los derechos reservados.
+
+## Versiones
+
+| Versión | Cambios |
+|---|---|
+| 1.1.0 | Dato opcional «Infestación de raigrás del lote» (baja / media / alta): el riesgo para el residual en pl/m² se calcula con esa densidad en lugar de la del sitio, con recomendaciones acordes (medio: residual opcional; bajo: no hace falta). |
+| 1.0.0 | Primera versión: código de las 8 apps al 13/11/2026. |
