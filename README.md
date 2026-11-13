@@ -14,10 +14,11 @@ historia local, tabla del residual) y su clima.
 
 ## Cómo lo usa cada app
 
-1. `requirements.txt` fija la versión:
+1. `requirements.txt` fija la versión, por commit (con la versión como comentario) o por etiqueta:
 
    ```
-   lolium-comun @ git+https://github.com/PREDWEEM/LOLIUM-COMUN@v1.0.0
+   lolium-comun @ git+https://github.com/PREDWEEM/LOLIUM-COMUN@<commit>  # v1.0.0
+   lolium-comun @ git+https://github.com/PREDWEEM/LOLIUM-COMUN@v1.1.0
    ```
 
 2. Los archivos `alerta_lolmu.py`, `visualizacion_alerta_lolmu.py` y `acceso_predweem.py` de la app son **puentes**
@@ -28,10 +29,11 @@ historia local, tabla del residual) y su clima.
 ## Cómo hacer un cambio
 
 1. Cambiar el código en `src/lolium_comun/`, agregar o ajustar pruebas en `tests/` y correr `pytest`.
-2. Subir la versión en `pyproject.toml` y en `src/lolium_comun/__init__.py`, fusionar en `main` y crear la etiqueta
-   (`git tag v1.1.0 && git push origin v1.1.0`).
-3. Con las apps clonadas al lado de este repositorio: `python scripts/actualizar_apps.py v1.1.0`, revisar y abrir un PR en
-   cada app. Al fusionarlo, Streamlit Cloud reinstala el paquete con la versión nueva.
+2. Subir la versión en `pyproject.toml` y en `src/lolium_comun/__init__.py` y fusionar en `main`. Opcional: crear la
+   etiqueta o *release* `v1.1.0` en GitHub (Releases → Draft a new release).
+3. Con las apps clonadas al lado de este repositorio: `python scripts/actualizar_apps.py v1.1.0` (si hay etiqueta) o
+   `python scripts/actualizar_apps.py <commit> v1.1.0`; revisar y abrir un PR en cada app. Al fusionarlo, Streamlit Cloud
+   reinstala el paquete con la versión nueva.
 
 Cada app queda fijada a una versión: un cambio en `main` no llega a las apps hasta que se actualiza su `requirements.txt`,
 así se puede probar en una app antes de pasarlo a las demás.
