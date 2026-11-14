@@ -577,8 +577,15 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     if modelo.p.get("residual"):
         _dr = modelo.p["residual"]["dia"]  # (no reutilizar _d: lo usa la curva del calendario local)
         r0, r1 = pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_dr[0]) - 1), pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_dr[-1]) - 1)
-        for f0 in pd.date_range(r0, r1, freq="7D"):
-            f1 = min(f0 + pd.Timedelta(days=7), r1 + pd.Timedelta(days=1))
+        # semanas ancladas en la fecha de siembra prevista: su celda empieza ese día y coincide con el recuadro del residual
+        _ini = [r0]
+        if siembra is not None and r0 <= pd.Timestamp(siembra) <= r1:
+            _a = pd.Timestamp(siembra) - pd.Timedelta(days=7 * ((pd.Timestamp(siembra) - r0).days // 7))
+            _ini = ([r0] if _a > r0 else []) + list(pd.date_range(_a, r1, freq="7D"))
+        else:
+            _ini = list(pd.date_range(r0, r1, freq="7D"))
+        for _i, f0 in enumerate(_ini):
+            f1 = min(_ini[_i + 1] if _i + 1 < len(_ini) else f0 + pd.Timedelta(days=7), r1 + pd.Timedelta(days=1))
             rk = al.riesgo_residual(f0, modelo, infestacion)
             if rk is None:
                 continue
@@ -586,7 +593,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             res_semanas.append(nv)
             cant = (f"{rk['residual']['plm2']:.0f} pl/m²" if rk.get("por_densidad") else f"{100 * rk['residual']['mediana']:.1f} % de la campaña").replace(".", ",")
             _celda(f0, f1, "residual", COLOR_RESIDUAL[nv],
-                   f"Siembra {f0:%d/%m}–{f1 - pd.Timedelta(days=1):%d/%m} · riesgo para el residual: {nv.lower()} ({cant} de "
+                   f"Semana {f0:%d/%m}–{f1 - pd.Timedelta(days=1):%d/%m} · siembra el {f0:%d/%m}: riesgo para el residual {nv.lower()} ({cant} de "
                    f"{-rk['ventana'][0]} días antes a {rk['ventana'][1]} días después de sembrar"
                    + (f"; infestación {rk['infestacion'].lower()} del lote" if rk.get("infestacion") else "") + ")")
     fig.add_trace(go.Scatter(x=hx, y=hy, mode="markers", marker=dict(size=16, opacity=0), text=ht, showlegend=False,
@@ -680,7 +687,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                "el pronóstico para los próximos 7 días. Un conteo en cero confirma las semanas que terminaron antes de esa fecha: "
                "esos tramos quedan en 0 %, igual que las semanas que terminaron más de 7 días antes de la fecha de primeras plántulas. En el medio, el semáforo semanal: la fila «Grandes flujos» repite el nivel de cada semana "
                "(verde, naranja, rojo; la celda con borde punteado son los próximos 7 días) y la fila «Residual», del 1/05 al 31/07, el "
-               "riesgo de nacimientos para el residual si se siembra esa semana (de 10 días antes a 45 días después de la siembra): rojo, "
+               "riesgo de nacimientos para el residual si se siembra el primer día de esa semana (de 10 días antes a 45 días después de la siembra; con fecha de siembra cargada, las semanas empiezan ese día y su celda coincide con el recuadro): rojo, "
                "alto o muy alto (≥ 20 pl/m²; usar residual); amarillo, medio (5–20 pl/m²); verde, bajo (< 5 pl/m²)"
                + (" con la infestación indicada para el lote" if infestacion else " con la densidad registrada en el sitio")
                + ". Abajo, la "

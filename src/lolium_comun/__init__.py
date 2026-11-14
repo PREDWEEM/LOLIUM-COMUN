@@ -8,4 +8,4 @@ Cada app conserva sus parámetros en ``alerta_lolmu_params.json`` y usa este paq
 mismos nombres (ver ``puentes/``).
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
