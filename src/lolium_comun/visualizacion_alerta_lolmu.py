@@ -381,7 +381,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     if modelo.p.get("residual"):
         _ref = rr is None
         _r = rr if rr is not None else al.riesgo_residual(pd.Timestamp(anio, 6, 1), modelo, infestacion)
-        _ico = {"Muy alto": "🔴", "Alto": "🟠", "Medio": "🟡", "Bajo": "🟢"}
+        _ico = {"Muy alto": "🔴", "Alto": "🔴", "Medio": "🟡", "Bajo": "🟢"}  # mismos colores que el semáforo
         _pc = lambda v: f"{100 * v:.1f} %".replace(".", ",")  # noqa: E731
         _rs = _r["residual"]
         _v0, _v1 = _r["ventana"]
