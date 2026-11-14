@@ -11,6 +11,7 @@ import streamlit as st
 from . import alerta_lolmu as al
 
 COLOR = {"alerta": "#c2410c", "atencion": "#d97706", "baja": "#15803d"}
+COLOR_RESIDUAL = {"Muy alto": "#dc2626", "Alto": "#dc2626", "Medio": "#facc15", "Bajo": "#16a34a"}  # semáforo del residual
 NOMBRE = {"alerta": "Alerta", "atencion": "Atención", "baja": "Sin alerta"}
 TEXTO = {"alerta": "Gran flujo probable en los próximos 7 días: recorrer el lote y preparar el control.",
          "atencion": "Probabilidad de un gran flujo por encima de lo habitual: conviene mirar el lote esta semana.",
@@ -491,6 +492,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     x_fin = max(emision + pd.Timedelta(days=14), pd.Timestamp(anio, 6, 30))
     if siembra is not None:  # que se vea la fecha de siembra prevista
         x_fin = max(x_fin, pd.Timestamp(siembra) + pd.Timedelta(days=10))
+    if modelo.p.get("residual"):  # que se vea la fila del residual hasta el fin de la ventana de siembra
+        x_fin = max(x_fin, pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(modelo.p["residual"]["dia"][-1])))
     if ancla is not None:
         estimado = r["primeras_plantulas"] is None
         f_ctl, f_lim = _fecha_tt(dgv, ancla, tt_control), _fecha_tt(dgv, ancla, tt_limite)
@@ -551,44 +554,41 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                              text=[f"{100 * p:.0f} %"], textposition="top center", textfont=dict(size=11, color=COLOR[nivel]),
                              hovertemplate=f"Próximos 7 días ({emision:%d/%m}–{fin_prox:%d/%m}): %{{y:.0f}} % · {NOMBRE[nivel]}<extra></extra>"),
                   row=1, col=1)
-    # semáforo semanal: una fila para el flush de la campaña y otra para la emergencia tardía (1/05–1/10); una
-    # celda por semana (de la emisión a 7 días después) y, con borde punteado, la de los próximos 7 días
-    v0, v1 = al.limites_ventana_siembra(anio, modelo)
-    _rec = (modelo.p.get("tardia") or {}).get("recorrida")
-    v1b = pd.Timestamp(anio, *_rec["hasta"]) if _rec else v1
-    fig.add_shape(type="rect", x0=v0, x1=v1b + pd.Timedelta(days=1), y0=0.02, y1=0.98, fillcolor="#f5f3ff", line_width=0, layer="below", row=2, col=1)
-    fig.add_annotation(x=v0, y=0.5, xref="x2", yref="y2", showarrow=False, xanchor="right", font=dict(size=10, color="#6d28d9"),
-                       text="flujos tardíos →" if emision < v0 else "")
+    # semáforo semanal: una fila para los grandes flujos (una celda por semana, de la emisión a 7 días después, y con
+    # borde punteado la de los próximos 7 días) y otra para el riesgo para el residual si se siembra esa semana
     hx, hy, ht = [], [], []
 
     def _celda(x0, x1, fila, color, texto, futura=False):
-        y0, y1 = (1.08, 1.92) if fila == "flush" else (0.08, 0.92)
+        y0, y1 = (1.08, 1.92) if fila == "flush" else (0.08, 0.92)  # fila de abajo: residual
         fig.add_shape(type="rect", x0=x0, x1=x1, y0=y0, y1=y1, fillcolor=color, opacity=0.55 if futura else 1.0,
                       line=dict(color="#111827" if futura else "white", width=2 if futura else 1, dash="dot" if futura else "solid"),
                       row=2, col=1)
         hx.append(x0 + (x1 - x0) / 2); hy.append((y0 + y1) / 2); ht.append(texto)
 
-    tardia_col = lambda v, u: "#6d28d9" if v >= u else "#ddd6fe"  # noqa: E731
-    tardia_nom = lambda v, u: "flujo tardío probable" if v >= u else "flujo tardío poco probable"  # noqa: E731
-    _ni = s["nivel_info"] if "nivel_info" in s else pd.Series(1, index=s.index)
-    for f0, f1, v, n, vt, ok, ni in zip(ini_sem, fin_sem, s["probabilidad"], s["nivel"], s["probabilidad_tardia"], pasadas, _ni):
+    for f0, f1, v, n, ok in zip(ini_sem, fin_sem, s["probabilidad"], s["nivel"], pasadas):
         if not ok:
             continue
         sem = f"{f0:%d/%m}–{f1 - pd.Timedelta(days=1):%d/%m}"
         _celda(f0, f1, "flush", COLOR[n], f"Semana {sem} · gran flujo: {NOMBRE[n]} ({100 * v:.0f} %)")
-        if not pd.isna(vt):
-            ut = al.umbral_tardia(f0, ni, modelo)
-            _celda(f0, f1, "tardia", tardia_col(vt, ut), f"Semana {sem} · {tardia_nom(vt, ut)} ({100 * vt:.0f} %; aviso desde {_pct(ut)})")
-        elif (_rc := al.recorrida_tardia(f0, modelo)):
-            _celda(f0, f1, "tardia", "#e5e7eb", f"Semana {sem} · flujos tardíos: recorrer cada {_rc['cada_dias'] // 7} semanas (sin probabilidad en invierno)")
     sem = f"{emision:%d/%m}–{fin_prox - pd.Timedelta(days=1):%d/%m}"
     _celda(emision, fin_prox, "flush", COLOR[nivel], f"Próximos 7 días ({sem}) · gran flujo: {NOMBRE[nivel]} ({100 * p:.0f} %)", futura=True)
-    if r.get("probabilidad_tardia") is not None:
-        vt = r["probabilidad_tardia"]
-        ut = r.get("umbral_tardia", al.UMBRAL_TARDIA)
-        _celda(emision, fin_prox, "tardia", tardia_col(vt, ut), f"Próximos 7 días ({sem}) · {tardia_nom(vt, ut)} ({100 * vt:.0f} %; aviso desde {_pct(ut)})", futura=True)
-    elif r.get("recorrida_tardia"):
-        _celda(emision, fin_prox, "tardia", "#e5e7eb", f"Próximos 7 días ({sem}) · flujos tardíos: recorrer cada {r['recorrida_tardia']['cada_dias'] // 7} semanas", futura=True)
+    # fila del residual: riesgo histórico de nacimientos de −10 a +45 días si se siembra esa semana (1/05–31/07)
+    res_semanas = []
+    if modelo.p.get("residual"):
+        _d = modelo.p["residual"]["dia"]
+        r0, r1 = pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_d[0]) - 1), pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_d[-1]) - 1)
+        for f0 in pd.date_range(r0, r1, freq="7D"):
+            f1 = min(f0 + pd.Timedelta(days=7), r1 + pd.Timedelta(days=1))
+            rk = al.riesgo_residual(f0, modelo, infestacion)
+            if rk is None:
+                continue
+            nv = rk["residual"]["nivel"]
+            res_semanas.append(nv)
+            cant = (f"{rk['residual']['plm2']:.0f} pl/m²" if rk.get("por_densidad") else f"{100 * rk['residual']['mediana']:.1f} % de la campaña").replace(".", ",")
+            _celda(f0, f1, "residual", COLOR_RESIDUAL[nv],
+                   f"Siembra {f0:%d/%m}–{f1 - pd.Timedelta(days=1):%d/%m} · riesgo para el residual: {nv.lower()} ({cant} de "
+                   f"{-rk['ventana'][0]} días antes a {rk['ventana'][1]} días después de sembrar"
+                   + (f"; infestación {rk['infestacion'].lower()} del lote" if rk.get("infestacion") else "") + ")")
     fig.add_trace(go.Scatter(x=hx, y=hy, mode="markers", marker=dict(size=16, opacity=0), text=ht, showlegend=False,
                              hovertemplate="%{text}<extra></extra>"), row=2, col=1)
     if conteos is not None and not conteos.empty:
@@ -657,7 +657,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                              text=[f"{100 * hoy['media']:.0f} % ({100 * hoy['p10']:.0f}–{100 * hoy['p90']:.0f} %)"], textposition="middle left",
                              textfont=dict(size=11, color="#14532d"), hoverinfo="skip", showlegend=False), row=3, col=1)
     fig.update_yaxes(title_text="Prob. de gran flujo (%)", range=[0, 106], row=1, col=1)
-    fig.update_yaxes(range=[0, 2], tickvals=[0.5, 1.5], ticktext=["Flujos tardíos<br>(≥ 2 %)", "Grandes flujos<br>(≥ 5 %)"], showgrid=False,
+    fig.update_yaxes(range=[0, 2], tickvals=[0.5, 1.5], ticktext=["Residual<br>(siembra)", "Grandes flujos<br>(≥ 5 %)"], showgrid=False,
                      zeroline=False, fixedrange=True, row=2, col=1)
     fig.update_yaxes(title_text="% de la campaña", range=[0, 102], row=3, col=1)
     if siembra is not None:  # fecha de siembra prevista: línea y flecha con cartel
@@ -679,10 +679,11 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                "información disponible ese día (color del punto = nivel); el tramo punteado, a la derecha de la fecha de emisión, es "
                "el pronóstico para los próximos 7 días. Un conteo en cero confirma las semanas que terminaron antes de esa fecha: "
                "esos tramos quedan en 0 %, igual que las semanas que terminaron más de 7 días antes de la fecha de primeras plántulas. En el medio, el semáforo semanal: la fila «Grandes flujos» repite el nivel de cada semana "
-               f"(verde, naranja, rojo) y la fila «Flujos tardíos», del {v0:%d/%m} al {v1:%d/%m}, marca en violeta fuerte las semanas con "
-               "flujo tardío probable (≥ 2 % de la campaña)"
-               + (f"; del {v1 + pd.Timedelta(days=1):%d/%m} al {v1b:%d/%m}, en gris, rige la recomendación de recorrer cada 2 semanas" if _rec else "")
-               + "; las celdas con borde punteado son los próximos 7 días. Abajo, la "
+               "(verde, naranja, rojo; la celda con borde punteado son los próximos 7 días) y la fila «Residual», del 1/05 al 31/07, el "
+               "riesgo de nacimientos para el residual si se siembra esa semana (de 10 días antes a 45 días después de la siembra): rojo, "
+               "alto o muy alto (≥ 20 pl/m²; usar residual); amarillo, medio (5–20 pl/m²); verde, bajo (< 5 pl/m²)"
+               + (" con la infestación indicada para el lote" if infestacion else " con la densidad registrada en el sitio")
+               + ". Abajo, la "
                + (f"emergencia acumulada esperada según el tiempo térmico acumulado desde las primeras plántulas ({_prim_tt:%d/%m}): "
                   "curva media y rango 10–90 % de las campañas de Bordenave; más allá del clima disponible se usan temperaturas "
                   "medias históricas. Sin fecha de primeras plántulas se usa el calendario. "
