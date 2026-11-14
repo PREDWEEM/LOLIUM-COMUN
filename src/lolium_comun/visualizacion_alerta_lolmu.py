@@ -2,6 +2,8 @@
 """Sección de la app: alerta validada de grandes flujos (flushes), reloj térmico desde las primeras plántulas y calendario."""
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -18,6 +20,8 @@ TEXTO = {"alerta": "Gran flujo probable en los próximos 7 días: recorrer el lo
          "baja": "Gran flujo poco probable en los próximos 7 días."}
 TEXTO_TOPE = ("Lluvias y calendario favorables a un gran flujo, pero todavía no se informaron plántulas: recorrer el lote para "
               "detectar el inicio (sin plántulas, la alerta llega como máximo a Atención).")
+LLUVIA_ACTIVACION_MM = 10.0  # lluvia mínima para activar el residual (en general 10–15 mm según la etiqueta)
+DIAS_ACTIVACION = 7  # días desde la aplicación (a la siembra) para que llueva lo necesario
 INFO = {1: "solo clima (sin datos del lote)", 2: "clima + fecha de primeras plántulas", 3: "clima + primeras plántulas + conteos"}
 
 
@@ -112,6 +116,68 @@ def _tt_ventana(meteo: pd.DataFrame, dg: pd.Series, emision: pd.Timestamp, model
     return pd.concat([conocido, medio]), ult
 
 
+def _fase_raigras(tt: float, tt_control: float, tt_limite: float) -> str:
+    """Estado del raigrás según el tiempo térmico desde las primeras plántulas (600–800 °Cd: 4 a 6 macollos)."""
+    cuatro_seis = (tt_control, tt_limite) == (600.0, 800.0)
+    if tt < tt_control:
+        return "todavía no llegó a 4 macollos" if cuatro_seis else "antes de la ventana del graminicida"
+    if tt <= tt_limite:
+        return "entre 4 y 6 macollos: momento óptimo" if cuatro_seis else "dentro de la ventana del graminicida"
+    return "más de 6 macollos: pasó el momento óptimo" if cuatro_seis else "después de la ventana del graminicida"
+
+
+def _lluvia_activacion(clima: pd.DataFrame, siembra: pd.Timestamp, ult: pd.Timestamp) -> dict:
+    """Lluvia registrada o pronosticada en los ``DIAS_ACTIVACION`` días desde la siembra (aplicación del residual).
+
+    ``ult`` es el último día con clima conocido a la fecha de emisión (registrado o pronóstico). Devuelve ``mm``, ``dias``
+    cubiertos, ``hasta`` y ``estado``: «probable» (≥ ``LLUVIA_ACTIVACION_MM``), «dudosa» (ventana completa con menos),
+    «pendiente» (ventana incompleta y todavía sin la lluvia necesaria) o «sin_datos» (la siembra es posterior al clima conocido).
+    """
+    siembra = pd.Timestamp(siembra).normalize()
+    fin = siembra + pd.Timedelta(days=DIAS_ACTIVACION - 1)
+    if siembra > ult:
+        return {"estado": "sin_datos", "mm": None, "dias": 0, "hasta": None}
+    hasta = min(fin, ult)
+    c = clima[(clima["Fecha"] >= siembra) & (clima["Fecha"] <= hasta)]
+    mm = float(c["Prec"].sum())
+    dias = int((hasta - siembra).days) + 1
+    estado = "probable" if mm >= LLUVIA_ACTIVACION_MM else ("dudosa" if hasta >= fin else "pendiente")
+    return {"estado": estado, "mm": mm, "dias": dias, "hasta": hasta}
+
+
+def _texto_activacion(a: dict, siembra: pd.Timestamp) -> str:
+    mm = LLUVIA_ACTIVACION_MM
+    if a["estado"] == "sin_datos":
+        return (f"Todavía no hay pronóstico para el {siembra:%d/%m}: el residual necesita unos {mm:.0f} mm en los "
+                f"{DIAS_ACTIVACION} días después de aplicarlo.")
+    lluvia = f"{a['mm']:.0f} mm del {siembra:%d/%m} al {a['hasta']:%d/%m}".replace(".", ",")
+    if a["estado"] == "probable":
+        return f"Activación probable: {lluvia} (hacen falta unos {mm:.0f} mm)."
+    if a["estado"] == "dudosa":
+        return f"Activación dudosa: {lluvia}, menos de los {mm:.0f} mm necesarios; sin lluvia el residual no actúa."
+    return (f"Activación pendiente: {lluvia} con el clima conocido; hacen falta unos {mm:.0f} mm en los {DIAS_ACTIVACION} "
+            "días después de aplicarlo.")
+
+
+def TIT_GRAMINICIDA(tt_control: float, tt_limite: float) -> str:  # noqa: N802
+    return ("Graminicida de barbecho (4–6 macollos)" if (tt_control, tt_limite) == (600.0, 800.0)
+            else f"Graminicida de barbecho ({tt_control:.0f}–{tt_limite:.0f} °Cd)")
+
+
+def _hueco_tardia(emision: pd.Timestamp, modelo) -> tuple | None:
+    """Período entre el fin del aviso de flujos tardíos (``tardia.hasta``) y el comienzo de la recorrida
+    (``tardia.recorrida.desde``), p. ej. julio: (inicio, fin, inicio de la recorrida) si la emisión cae en él, si no None."""
+    t = modelo.p.get("tardia") or {}
+    rec = t.get("recorrida")
+    if not t.get("hasta") or not rec:
+        return None
+    a = emision.year
+    h0 = pd.Timestamp(a, *t["hasta"]) + pd.Timedelta(days=1)
+    hr = pd.Timestamp(a, *rec["desde"])
+    h1 = hr - pd.Timedelta(days=1)
+    return (h0, h1, hr) if h0 <= h1 and h0 <= emision <= h1 else None
+
+
 def _pct(u: float) -> str:
     """20 % / 10 %."""
     return f"{100 * u:g} %".replace(".", ",")
@@ -145,7 +211,7 @@ def _texto_muestreo_inicio(meteo: pd.DataFrame, emision: pd.Timestamp, conteos: 
             partes.append(f"Último conteo en cero: {ult:%d/%m}; el próximo, el {ult + pd.Timedelta(days=7):%d/%m}.")
     partes.append(f"El inicio de la emergencia suele darse entre el <b>{p10:%d/%m} y el {p90:%d/%m}</b> (mediana {med:%d/%m}), pero "
                   "varía mucho entre años y lotes y el clima no lo anticipa bien: lo que más mejora la alerta es la fecha de las "
-                  "primeras plántulas, que ancla la curva acumulada, el reloj térmico y la ventana de control.")
+                  "primeras plántulas, que ancla la curva acumulada, el reloj térmico y la ventana del graminicida de barbecho.")
     return ("<div style='background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe;padding:0.75rem 1.1rem;border-radius:0.6rem;"
             "margin:0.2rem 0 0.8rem 0;font-size:0.98rem'>🗓️ <b>Muestreo hasta el inicio.</b> " + " ".join(partes) + "</div>")
 
@@ -224,7 +290,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                 min_value=pd.Timestamp(anio, 1, 1).date(), max_value=ultima.date(), format="DD/MM/YYYY",
                 key="alerta_lolmu_primeras",
                 help="Un solo dato por campaña: el día en que aparecieron las primeras plántulas en el lote. Ancla el reloj "
-                     "térmico de la ventana de control y mejora la alerta. Para borrarla, vacíe el campo.")
+                     "térmico de la ventana del graminicida de barbecho y mejora la alerta. Para borrarla, vacíe el campo.")
         with c3:
             siembra = st.date_input(
                 "Fecha de siembra prevista (opcional)", value=None,
@@ -295,6 +361,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         opc["tope_hasta_ultimo_cero"] = True
     r = al.evaluar(meteo, emision, primeras, conteos, modelo, **tt, **opc)
     p, nivel = r["probabilidad"], r["nivel"]
+    caja_hacer = st.container()  # «Qué hacer esta semana»: se completa más abajo, con todos los resultados
+    hacer = []
     st.markdown(
         f"<div style='background:{COLOR[nivel]};color:white;padding:0.9rem 1.1rem;border-radius:0.6rem;margin:0.4rem 0 0.8rem 0;"
         f"font-size:1.05rem'><b>{emision:%d/%m/%Y}</b> · <b>{NOMBRE[nivel]}</b> · probabilidad de un gran flujo (≥ 5 % de la campaña) en los próximos 7 días: "
@@ -324,6 +392,9 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                        f"{100 * hl['mediana']:.0f} % de la campaña (entre {100 * _vv.min():.0f} y {100 * _vv.max():.0f} % según el año).</span>")
         _tit = ("Flujo tardío posible según el modelo; en " + hl["sitio"] + " la emergencia suele cortarse antes") if (tardia_si and corte_local) else (
             "Flujo tardío probable" if tardia_si else "Flujo tardío poco probable")
+        if tardia_si:
+            hacer.append("🌾 **Flujo tardío " + ("posible" if corte_local else "probable") + f" ({pt:.0%})**: recorrer el lote antes de "
+                         "definir la fecha de siembra.")
         _fondo, _letra = ("#6d28d9", "white") if (tardia_si and not corte_local) else (("#c4b5fd", "#2e1065") if tardia_si else ("#ede9fe", "#3b0764"))
         st.markdown(
             f"<div style='background:{_fondo};color:{_letra};"
@@ -338,8 +409,19 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             "pocas plantas por semana pueden importar para la fecha de siembra; con conteos semanales el aviso es más preciso.</span>"
             + _txt_hl + "</div>",
             unsafe_allow_html=True)
+    elif _hueco_tardia(emision, modelo) is not None:
+        _h0, _h1, _hr = _hueco_tardia(emision, modelo)
+        st.markdown(
+            "<div style='background:#ede9fe;color:#3b0764;padding:0.75rem 1.1rem;border-radius:0.6rem;margin:-0.3rem 0 0.8rem 0;font-size:1.0rem'>"
+            f"🌾 <b>Flujos tardíos · Siembra y residual</b> · Del {_h0:%d/%m} al {_h1:%d/%m} la alerta no anticipa los flujos tardíos: "
+            "la emergencia que acompaña a la siembra se controla con el <b>residual</b> (ver el riesgo para el residual abajo)"
+            + (f"; desde el {_hr:%d/%m}, recorrer los lotes cada 2 semanas para definir uso de graminicida postemergente." if _hr is not None else ".")
+            + "</div>", unsafe_allow_html=True)
+        hacer.append(f"🌾 **Siembra:** la emergencia que acompaña a la siembra se controla con el residual"
+                     + (f"; desde el {_hr:%d/%m}, recorrer los lotes cada 2 semanas." if _hr is not None else "."))
     elif r.get("recorrida_tardia"):
         rec = r["recorrida_tardia"]
+        hacer.append(f"🌾 **Recorrer los lotes cada {rec['cada_dias'] // 7} semanas** para definir uso de graminicida postemergente.")
         st.markdown(
             "<div style='background:#ede9fe;color:#3b0764;padding:0.75rem 1.1rem;border-radius:0.6rem;margin:-0.3rem 0 0.8rem 0;font-size:1.0rem'>"
             f"🌾 <b>Flujos tardíos · Recorrer cada {rec['cada_dias'] // 7} semanas</b> · {rec['texto']}</div>",
@@ -366,18 +448,22 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         tt_hoy = float(dg[(dg.index >= ancla) & (dg.index <= emision)].sum())
         f_ctl, f_lim = _fecha_tt(dgv, ancla, tt_control), _fecha_tt(dgv, ancla, tt_limite)
         _est = lambda d: d is not None and d > ult_tt  # noqa: E731
-        m3.metric("Tiempo térmico desde el inicio", f"{tt_hoy:.0f} °Cd", help=f"Desde el {ancla:%d/%m} ({ancla_txt}).")
-        m4.metric(f"Control post-emergente ({tt_control:.0f} °Cd)",
+        _fase = _fase_raigras(tt_hoy, tt_control, tt_limite)
+        m3.metric("Tiempo térmico desde el inicio", f"{tt_hoy:.0f} °Cd",
+                  help=f"Desde el {ancla:%d/%m} ({ancla_txt}). Raigrás: {_fase}.")
+        m4.metric(TIT_GRAMINICIDA(tt_control, tt_limite),
                   (f"{f_ctl:%d/%m}" + (" (estimada)" if _est(f_ctl) else "")) if f_ctl is not None else "—",
-                  help=(f"Límite de la ventana ({tt_limite:.0f} °Cd): {f_lim:%d/%m}" + (" (estimada)" if _est(f_lim) else "") + "."
-                        if f_lim is not None else "")
+                  help=(f"Ventana óptima del graminicida de barbecho: {tt_control:.0f}–{tt_limite:.0f} °Cd desde las primeras plántulas"
+                        + (", raigrás de 4 a 6 macollos" if (tt_control, tt_limite) == (600.0, 800.0) else "") + ". "
+                        + (f"Fin de la ventana ({tt_limite:.0f} °Cd): {f_lim:%d/%m}" + (" (estimada)" if _est(f_lim) else "") + "."
+                           if f_lim is not None else ""))
                        + (f" Las fechas estimadas suman el clima medio desde el {ult_tt + pd.Timedelta(days=1):%d/%m}; se corrigen "
                           "a medida que se carga el clima." if _est(f_lim) else " Alcanzada con el clima registrado.")
                        )
     else:
         m3.metric("Tiempo térmico desde el inicio", "—", help="Informe la fecha de las primeras plántulas para iniciar el reloj térmico.")
-        m4.metric(f"Control post-emergente ({tt_control:.0f} °Cd)", "—",
-                  help="Informe la fecha de las primeras plántulas para calcular la ventana de control. El inicio de la emergencia no se "
+        m4.metric(TIT_GRAMINICIDA(tt_control, tt_limite), "—",
+                  help="Informe la fecha de las primeras plántulas para calcular la ventana del graminicida de barbecho. El inicio de la emergencia no se "
                        "estima con el clima: ninguna regla lo predijo con precisión suficiente (error medio de 10–20 días).")
     # debajo de las tarjetas: riesgo de nacimientos para el residual a la siembra
     rr = al.riesgo_residual(pd.Timestamp(siembra), modelo, infestacion) if siembra is not None else None
@@ -429,7 +515,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                     + ("." if _inf else "; en un lote con menos raigrás el riesgo es menor: indique la infestación del lote (arriba).") + " ") if _dens else
                    "Según la emergencia típica (mediana) de la campaña en ese período: muy alto ≥ 5 % de la campaña, alto 2–5 %, "
                    "medio 0,5–2 % y bajo < 0,5 %. ") + "Riesgo histórico: el modelo no anticipa cuánto nacerá en esta campaña."
-            r1, r2, r3 = st.columns(3)
+            _act = _lluvia_activacion(clima, rr["siembra"], ult_tt) if rr is not None else None
+            r1, r2, r3, *_r4 = st.columns(4 if _act is not None else 3)
             r1.metric("Riesgo para el residual", f"{_ico[_rs['nivel']]} {_rs['nivel']}",
                       help=f"Nacimientos entre {-_v0} días antes y {_v1} días después de la siembra, período de acción promedio del residual. " + _hn)
             r2.metric(f"Nacimientos de −{-_v0} a +{_v1} días", f"{_pl(_rs['plm2'])} ({_pc(_rs['mediana'])})" if _dens else _pc(_rs["mediana"]),
@@ -442,6 +529,12 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                             "Muy alto: usar residual. Alto: residual recomendado. Medio: residual si el lote tiene alta infestación o "
                             "antecedentes de raigrás. Bajo: residual solo en lotes muy infestados. ")
                            + "Producto y dosis: consultar al asesor y la etiqueta.")
+            if _act is not None:
+                _r4[0].metric(f"Lluvia para activar ({DIAS_ACTIVACION} días)",
+                              ("—" if _act["mm"] is None else f"{_act['mm']:.0f} mm") + " · "
+                              + {"probable": "✅ probable", "dudosa": "⚠️ dudosa", "pendiente": "⏳ pendiente", "sin_datos": "sin pronóstico"}[_act["estado"]],
+                              help=_texto_activacion(_act, rr["siembra"]) + " Lluvia registrada y pronosticada a la fecha de emisión; "
+                                   "el mínimo exacto depende del producto (ver etiqueta).")
             _lr = _loc(_rs)
             st.caption((f"{_r['sitio']}, nacimientos en la ventana del residual: {_lr}. " if _lr else "")
                        + (f"Campañas por nivel: {_dist(_rs)}. " if _dist(_rs) else "")
@@ -452,7 +545,51 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         st.markdown(_texto_muestreo_inicio(meteo, emision, conteos, modelo), unsafe_allow_html=True)
     elif r["primeras_plantulas"] is None:
         st.info("Sin fecha de primeras plántulas: la alerta usa solo el clima. Cuando aparezcan las primeras plántulas "
-                "en el lote, cargue esa fecha arriba: ancla el reloj térmico de la ventana de control y mejora la alerta.")
+                "en el lote, cargue esa fecha arriba: ancla el reloj térmico de la ventana del graminicida de barbecho y mejora la alerta.")
+
+    # ---- «Qué hacer esta semana»: junta en un recuadro arriba lo que piden la alerta, la ventana, el residual y la recorrida
+    _arriba = []
+    if r.get("cero_reciente") is None:
+        if nivel == "alerta":
+            _arriba.append(f"🔴 **Gran flujo probable en los próximos 7 días ({p:.0%})**: recorrer el lote y preparar el control.")
+        elif nivel == "atencion":
+            _arriba.append(f"🟠 **Gran flujo posible ({p:.0%})**: " + ("recorrer el lote para detectar el inicio." if r.get("tope_aplicado")
+                                                                        else "conviene mirar el lote esta semana."))
+    if r["primeras_plantulas"] is None and emision.month <= 6:
+        _arriba.append("👀 **Recorrer el lote cada semana** hasta ver las primeras plántulas y cargar esa fecha: con ella se calcula "
+                       "el momento del graminicida de barbecho.")
+    if ancla is not None and f_ctl is not None and f_lim is not None:
+        _4_6 = (tt_control, tt_limite) == (600.0, 800.0)
+        _estim = "fechas estimadas con clima medio" if _est(f_ctl) or _est(f_lim) else ""
+        if tt_hoy < tt_control:
+            _par = "; ".join(x for x in ("raigrás de 4 a 6 macollos" if _4_6 else f"{tt_control:.0f}–{tt_limite:.0f} °Cd", _estim) if x)
+            _arriba.append(f"🌱 **Graminicida de barbecho: aplicar del {f_ctl:%d/%m} al {f_lim:%d/%m}** ({_par}); hoy lleva "
+                           f"{tt_hoy:.0f} °Cd desde las primeras plántulas.")
+        elif tt_hoy <= tt_limite:
+            _arriba.append("🌱 **Momento óptimo para el graminicida de barbecho**"
+                           + (": el raigrás está entre 4 y 6 macollos" if _4_6 else "") + f", hasta el {f_lim:%d/%m}"
+                           + (f" ({_estim})" if _estim else "") + ".")
+        elif (emision - f_lim).days <= 30:
+            _arriba.append(f"🌱 **Graminicida de barbecho:** la ventana óptima terminó el {f_lim:%d/%m}"
+                           + (" (más de 6 macollos)" if _4_6 else "") + "; con plantas más grandes baja la eficacia: consultar al asesor.")
+    if rr is not None:
+        _rs0 = rr["residual"]
+        _cant = f"~{_rs0['plm2']:.0f} pl/m²" if rr.get("por_densidad") else f"{100 * _rs0['mediana']:.1f} % de la campaña".replace(".", ",")
+        _frase = {"Usar residual": "usar residual", "Residual recomendado": "residual recomendado", "Residual opcional": "residual opcional",
+                  "No necesario": "residual no necesario", "Según infestación": "residual según la infestación del lote",
+                  "Solo si muy infestado": "residual solo si el lote está muy infestado"}[_rec_res]
+        _arriba.append(f"🧪 **Siembra {rr['siembra']:%d/%m}: {_frase}** (riesgo {_rs0['nivel'].lower()}, {_cant} de "
+                       f"{-rr['ventana'][0]} días antes a {rr['ventana'][1]} días después de sembrar). "
+                       + (_texto_activacion(_act, rr["siembra"]) if _rs0["nivel"] != "Bajo" else ""))
+    elif modelo.p.get("residual") and 4 <= emision.month <= 7:
+        _arriba.append("🧪 Cargue la **fecha de siembra prevista** (arriba) para saber si conviene un residual.")
+    hacer = _arriba + hacer
+    with caja_hacer:
+        with st.container(border=True):
+            st.markdown(f"**📋 Qué hacer esta semana** · {emision:%d/%m/%Y}")
+            st.markdown("\n".join(f"- {h}" for h in hacer) if hacer else
+                        "- 🟢 Sin acciones previstas esta semana: gran flujo poco probable.")
+            st.caption("Guía según el modelo y los datos cargados. Producto y dosis: consultar al asesor y la etiqueta.")
 
     # gráfico único: alerta semanal (arriba) y emergencia acumulada (abajo), con la ventana de control en tiempo térmico
     s = al.serie(meteo, pd.Timestamp(anio, 2, 2), emision, primeras, conteos, modelo, paso=7, **tt, **opc)
@@ -513,7 +650,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                     fig.add_vrect(x0=x0, x1=x1, fillcolor="#7c3aed", opacity=op, line=borde or dict(width=0),
                                   exclude_empty_subplots=False, row=fila, col=1)
             fig.add_annotation(x=f_ctl + (fin_ventana - f_ctl) / 2, y=97, xref="x", yref="y", showarrow=False, font=dict(size=12, color="#5b21b6"),
-                               text=f"Ventana de control {tt_control:.0f}–{tt_limite:.0f} °Cd" + (" (inicio estimado)" if estimado else "")
+                               text=("Graminicida de barbecho: 4–6 macollos" if (tt_control, tt_limite) == (600.0, 800.0) else "Graminicida de barbecho")
+                                    + f" ({tt_control:.0f}–{tt_limite:.0f} °Cd)" + (" (inicio estimado)" if estimado else "")
                                     + f"<br>{f_ctl:%d/%m} – {fin_ventana:%d/%m}"
                                     + (f"<br><i>estimada con clima medio desde el {ult_tt + pd.Timedelta(days=1):%d/%m}</i>" if con_medio else ""))
         for fila in (1, 2, 3):
@@ -680,7 +818,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                            borderwidth=1.5, borderpad=4)
     fig.update_xaxes(range=[pd.Timestamp(anio, 2, 1), x_fin], tickformat="%d/%m")
     fig.update_layout(height=780, margin=dict(t=40, b=10, l=10, r=10), showlegend=False, hovermode="closest",
-                      title=dict(text="Alerta de grandes flujos, emergencia acumulada y ventana de control", font=dict(size=15)))
+                      title=dict(text="Alerta de grandes flujos, emergencia acumulada y ventana del graminicida de barbecho", font=dict(size=15)))
     fig.update_annotations(selector=dict(text="Probabilidad de un gran flujo en los próximos 7 días"), font_size=12)
     fig.update_annotations(selector=dict(text=titulo_cal), font_size=12)
     fig.update_annotations(selector=dict(text="Semáforo semanal"), font_size=12)
@@ -705,7 +843,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                   if calendario_local else "emergencia acumulada esperada según el calendario de referencia regional (curva media y rango 10–90 %). "))
                + (f"La curva arranca el día de las primeras plántulas ({_p0:%d/%m}) en la fracción típica ya emergida al verlas. "
                   if usa_prim else "")
-               + "La franja violeta es la ventana de control post-emergente en tiempo térmico desde el inicio; el tramo claro con borde "
+               + "La franja violeta es la ventana del graminicida de barbecho en tiempo térmico desde las primeras plántulas (600–800 °Cd: raigrás de 4 a 6 macollos, con los valores por defecto); el tramo claro con borde "
                "punteado todavía no se alcanzó con el clima registrado y se estima con el clima medio.")
 
     with st.expander("Cómo se validó esta alerta"):
@@ -720,7 +858,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             f"{modelo.p.get('fuente', '')}\n\nCada campaña se predijo con el modelo ajustado sin ella. Las probabilidades están "
             "calibradas (cuando dice ~25 %, el gran flujo ocurrió en ~27 % de las semanas). Como referencia, con las mismas campañas "
             "el motor PREDWEEM de arriba da AUC ~0,70 para anticipar grandes flujos, y su primer pico erró el inicio de la emergencia en "
-            "17–20 días en promedio (31 campañas): por eso el reloj térmico y la ventana de control se anclan solo en las primeras "
+            "17–20 días en promedio (31 campañas): por eso el reloj térmico y la ventana del graminicida se anclan solo en las primeras "
             "plántulas observadas.\n\n"
             "**Límites.** Un sitio y lotes sin labranza. La fecha de primeras plántulas mejora la alerta (AUC +0,07 sobre el clima "
             "solo) y los conteos semanales algo más (+0,10). La señal de lluvia usa el modelo de pulsos ajustado a estas campañas "
@@ -748,13 +886,13 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     resumen = pd.DataFrame({"Indicador": [
         "Localidad", "Fecha de generación", "Fecha de emisión", "Nivel de alerta", "Probabilidad de gran flujo (≥ 5 %) en 7 días (%)",
         "Información usada", "Inicio del reloj térmico", "Origen del inicio", "Tiempo térmico desde el inicio (°Cd)",
-        f"Fecha de control post-emergente ({tt_control:.0f} °Cd)", f"Fecha límite de la ventana ({tt_limite:.0f} °Cd)",
+        f"Graminicida de barbecho: inicio de la ventana óptima ({tt_control:.0f} °Cd)", f"Graminicida de barbecho: fin de la ventana óptima ({tt_limite:.0f} °Cd)",
         "Emergencia acumulada esperada a la fecha (%)", f"Rango {rango_txt} de la emergencia acumulada (%)",
         "Señal de calendario (emergencia esperada en 7 días, %)", "Señal de lluvia (respuesta relativa, %)",
         "Conteos usados (fechas)", "Primeras plántulas informadas"],
         "Valor": [
         f"{localidad} (Buenos Aires)", pd.Timestamp.now().strftime("%d/%m/%Y %H:%M"), fmt_f(emision), NOMBRE[nivel], round(100 * p, 1),
-        INFO[r["nivel_info"]], fmt_f(ancla), ancla_txt or "sin primeras plántulas: la ventana de control no se calcula", round(tt_r, 1) if tt_r is not None else "",
+        INFO[r["nivel_info"]], fmt_f(ancla), ancla_txt or "sin primeras plántulas: la ventana del graminicida no se calcula", round(tt_r, 1) if tt_r is not None else "",
         fmt_f(f_ctl_r) + (" (estimada con clima medio)" if f_ctl_r is not None and f_ctl_r > ult_tt else ""),
         fmt_f(f_lim_r) + (" (estimada con clima medio)" if f_lim_r is not None and f_lim_r > ult_tt else ""),
         round(100 * hoy["media"], 1), f"{100 * hoy['p10']:.0f}–{100 * hoy['p90']:.0f}",
@@ -782,6 +920,12 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                        {"Muy alto": "usar residual", "Alto": "residual recomendado", "Medio": "según infestación (lotes con alta infestación o antecedentes de raigrás)",
                         "Bajo": "solo en lotes muy infestados"})[rr["residual"]["nivel"]] + " · riesgo histórico, no predicción de la campaña"]})],
             ignore_index=True)
+        _act_x = _lluvia_activacion(clima, rr["siembra"], ult_tt)
+        resumen = pd.concat([resumen, pd.DataFrame({"Indicador": [f"Lluvia para activar el residual ({DIAS_ACTIVACION} días desde la siembra)"],
+                                                    "Valor": [_texto_activacion(_act_x, rr["siembra"])]})], ignore_index=True)
+    _plano = lambda t: re.sub(r"\*\*|[🔴🟠🟢👀🌱🧪🌾]\s*", "", t).strip()  # noqa: E731
+    resumen = pd.concat([pd.DataFrame({"Indicador": [f"Qué hacer esta semana ({i + 1})" for i in range(len(hacer))],
+                                       "Valor": [_plano(h) for h in hacer]}), resumen], ignore_index=True)
     if agotamiento:
         _ag = r["senales"].get("agotamiento")
         resumen = pd.concat([resumen, pd.DataFrame({"Indicador": ["Agotamiento de la cohorte (factor sobre la probabilidad)"],
@@ -803,7 +947,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                                "Origen": np.where(dd.index <= min(emision, ult_tt), "clima registrado",
                                                   np.where(dd.index <= ult_tt, "pronóstico", "clima medio"))})
         tt_out["Etapa"] = np.where(tt_out["TT acumulado desde el inicio (°Cd)"] < tt_control, "antes de la ventana",
-                                   np.where(tt_out["TT acumulado desde el inicio (°Cd)"] <= tt_limite, "ventana de control", "después de la ventana"))
+                                   np.where(tt_out["TT acumulado desde el inicio (°Cd)"] <= tt_limite, "ventana del graminicida", "después de la ventana"))
     else:
         tt_out = pd.DataFrame()
     clima_out = clima[clima["Fecha"] <= emision + pd.Timedelta(days=7)].rename(columns={"Prec": "Lluvia (mm)"})
