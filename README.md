@@ -60,6 +60,7 @@ Ver `COPYRIGHT.md`. Copyright © 2026 Guillermo R. Chantre / PREDWEEM. Todos los
 |---|---|
 | 1.3.0 | En el semáforo semanal, la fila «Flujos tardíos» se reemplaza por «Residual (siembra)»: para cada semana del 1/05 al 31/07, el riesgo para el residual si se siembra esa semana (rojo: alto o muy alto, ≥ 20 pl/m²; amarillo: medio, 5–20; verde: bajo, < 5), con la infestación del lote si se indicó. El recuadro de flujos tardíos sigue igual. |
 | 1.3.1 | Semáforo del residual: con fecha de siembra cargada, las semanas empiezan ese día, así la celda de la siembra coincide con el recuadro del residual (antes la celda se calculaba con el primer día de una semana fija y podía mostrar otro nivel). El recuadro usa los mismos colores que el semáforo (alto en rojo). |
+| 1.3.2 | Recuadro de flujos tardíos en invierno: muestra solo el texto de `tardia.recorrida` (recorrer cada 2 semanas para definir uso de graminicida postemergente); el período de la recorrida en la ayuda y el Excel sale de los parámetros (ahora 1/08–1/10). |
 | 1.2.0 | La fecha de siembra prevista se marca en el gráfico con una línea y una flecha con cartel. Se quitan de la app las menciones a «17 campañas» (título de la alerta, curvas y textos). |
 | 1.1.0 | Dato opcional «Infestación de raigrás del lote» (baja / media / alta): el riesgo para el residual en pl/m² se calcula con esa densidad en lugar de la del sitio, con recomendaciones acordes (medio: residual opcional; bajo: no hace falta). |
 | 1.0.0 | Primera versión: código de las 8 apps al 13/11/2026. |

@@ -249,7 +249,7 @@ def riesgo_residual(siembra: pd.Timestamp, modelo: "AlertaLolmu | None" = None, 
 
 
 def recorrida_tardia(fecha: pd.Timestamp, modelo: "AlertaLolmu | None" = None) -> dict | None:
-    """Recomendación fija de recorrida para el invierno (``tardia.recorrida``; por defecto, 1/07–1/10), o None.
+    """Recomendación fija de recorrida para el invierno (``tardia.recorrida``; p. ej. 1/08–1/10), o None.
 
     En esos meses la probabilidad de flujo tardío no distinguió las semanas con emergencia (AUC ≤ 0,5 en Bordenave),
     así que en lugar de un aviso por probabilidad se recomienda recorrer los lotes cada ``cada_dias`` días.
@@ -291,7 +291,7 @@ class AlertaLolmu:
         """Probabilidad de que en los próximos 7 días emerja ≥ 2 % de la campaña (emergencia tardía).
 
         Solo dentro del período de flujos tardíos (``desde``–``hasta``, [mes, día]; 1/05–30/06); fuera de él devuelve None
-        (del 1/07 al 1/10 rige la recomendación fija de ``recorrida_tardia``).
+        (en el período de ``tardia.recorrida`` rige la recomendación fija de ``recorrida_tardia``).
         Recalibra la probabilidad de flush con logit(p) = a + b·logit(p_flush), con a y b por nivel de información.
         """
         t = self.p.get("tardia")

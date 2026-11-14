@@ -342,10 +342,13 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         rec = r["recorrida_tardia"]
         st.markdown(
             "<div style='background:#ede9fe;color:#3b0764;padding:0.75rem 1.1rem;border-radius:0.6rem;margin:-0.3rem 0 0.8rem 0;font-size:1.0rem'>"
-            f"🌾 <b>Flujos tardíos · Recorrer cada {rec['cada_dias'] // 7} semanas</b> · {rec['texto']}"
-            f"<br><span style='font-size:0.88rem;opacity:0.9'>Del {rec['desde']:%d/%m} al {rec['hasta']:%d/%m} no se muestra una probabilidad de flujo "
-            "tardío: en Bordenave no distinguió las semanas con emergencia de las demás.</span></div>",
+            f"🌾 <b>Flujos tardíos · Recorrer cada {rec['cada_dias'] // 7} semanas</b> · {rec['texto']}</div>",
             unsafe_allow_html=True)
+    _rp = (modelo.p.get("tardia") or {}).get("recorrida") or {}
+    _per_rec = (f"del {_rp['desde'][1]}/{_rp['desde'][0]:02d} al {_rp['hasta'][1]}/{_rp['hasta'][0]:02d}" if _rp else "")
+    _txt_rec_exp = (f"{_per_rec[0].upper() + _per_rec[1:]} no se da probabilidad: en Bordenave no distinguió las semanas con flujos "
+                    "tardíos (AUC ≤ 0,5), así que se recomienda recorrer los lotes cada 2 semanas para definir el uso de un graminicida "
+                    "postemergente." if _rp else "")
     clima = al.limpiar_clima(meteo)
     dg = al.tiempo_termico(clima, **tt)
     dgv, ult_tt = _tt_ventana(meteo, dg, emision, modelo, localidad)  # ventana de control: clima conocido + clima medio
@@ -729,8 +732,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                 "**Flujos tardíos (1/05–30/06).** Probabilidad de que en los próximos 7 días emerja al menos "
                 f"2 % de la campaña; aviso desde {al.UMBRAL_TARDIA:.0%} (25 % sin datos del lote). Es la misma alerta recalibrada para esa época, en la que los "
                 "grandes flujos (≥ 5 %) son raros pero pocas plantas por semana importan para decidir la fecha de siembra. "
-                "Del 1/07 al 1/10 no se da probabilidad: en Bordenave no distinguió las semanas con flujos tardíos (AUC ≤ 0,5), "
-                "así que se recomienda recorrer los lotes cada 2 semanas.\n\n"
+                + _txt_rec_exp + "\n\n"
                 "| Información | AUC Bordenave | Detectadas | Semanas marcadas | AUC otras localidades | Detectadas | Marcadas |\n|---|---|---|---|---|---|---|\n"
                 + "\n".join(f"| {k} | {d['auc']:.2f} | {d['det']:.0%} | {d['marcadas']:.0%} | "
                              + (f"{o['auc']:.2f} | {o['det']:.0%} | {o['marcadas']:.0%} |" if (o := tv['validacion_otras'].get(k if k != '+ conteos semanales' else '+ conteos')) else "— | — | — |")
@@ -760,8 +762,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         round(100 * r["senales"]["cal"], 2), round(100 * r["senales"]["lluvia"], 2),
         int((conteos["Fecha"] <= emision).sum()) if conteos is not None else 0, fmt_f(r["primeras_plantulas"])]})
     resumen = pd.concat([resumen, pd.DataFrame({"Indicador": ["Probabilidad de flujo tardío (≥ 2 % de la campaña en 7 días, %)",
-                                                              "Aviso de flujo tardío (1/05–30/06; del 1/07 al 1/10, recorrida cada 2 semanas)"],
-                                                "Valor": [round(100 * pt, 1) if pt is not None else ("sin probabilidad: recorrer los lotes cada 2 semanas (1/07–1/10)"
+                                                              f"Aviso de flujo tardío (1/05–30/06; {_per_rec}, recorrida cada 2 semanas)"],
+                                                "Valor": [round(100 * pt, 1) if pt is not None else (f"sin probabilidad: recorrer los lotes cada 2 semanas ({_per_rec})"
                                                           if r.get("recorrida_tardia") else "fuera del período de flujos tardíos (1/05–1/10)"),
                                                           ("probable" if pt >= r.get("umbral_tardia", al.UMBRAL_TARDIA) else "poco probable") if pt is not None else ""]})],
                         ignore_index=True)
