@@ -575,8 +575,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     # fila del residual: riesgo histórico de nacimientos de −10 a +45 días si se siembra esa semana (1/05–31/07)
     res_semanas = []
     if modelo.p.get("residual"):
-        _d = modelo.p["residual"]["dia"]
-        r0, r1 = pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_d[0]) - 1), pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_d[-1]) - 1)
+        _dr = modelo.p["residual"]["dia"]  # (no reutilizar _d: lo usa la curva del calendario local)
+        r0, r1 = pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_dr[0]) - 1), pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_dr[-1]) - 1)
         for f0 in pd.date_range(r0, r1, freq="7D"):
             f1 = min(f0 + pd.Timedelta(days=7), r1 + pd.Timedelta(days=1))
             rk = al.riesgo_residual(f0, modelo, infestacion)
