@@ -161,7 +161,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                          curva_desde_primeras: bool = False) -> dict | None:
     """``calendario_local`` (opcional): curva acumulada propia del sitio para el panel de emergencia acumulada, con claves
     ``dia`` (día del año), ``media``, ``bajo``, ``alto`` (fracciones 0–1), ``campanias`` (lista de años) y ``rango``
-    (texto del rango, p. ej. "mínimo–máximo"). La probabilidad de flush sigue usando el calendario de Bordenave."""
+    (texto del rango, p. ej. "mínimo–máximo"). La probabilidad de flush sigue usando el calendario de referencia regional."""
     calibrada_aqui = localidad == "Bordenave"
     if calendario_local:
         _d = np.asarray(calendario_local["dia"], float)
@@ -178,9 +178,9 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     else:
         _curva = None
         rango_txt = "10–90 %"
-        titulo_cal = "Emergencia acumulada esperada (calendario de Bordenave)"
+        titulo_cal = f"Emergencia acumulada esperada (calendario de {localidad if calibrada_aqui else 'referencia regional'})"
     st.subheader("🔔 Alerta de grandes flujos validada" if calibrada_aqui
-                 else f"🔔 Alerta de grandes flujos · {localidad} (modelo calibrado en Bordenave)")
+                 else f"🔔 Alerta de grandes flujos · {localidad}")
     st.caption("Probabilidad de que en los próximos 7 días emerja ≥ 5 % de la campaña. Combina el calendario medio de "
                "LOLMU, la respuesta a las lluvias ya registradas y, si se informa, la fecha de las primeras plántulas "
                "del lote. Independiente del motor PREDWEEM de arriba.")
@@ -346,7 +346,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             unsafe_allow_html=True)
     _rp = (modelo.p.get("tardia") or {}).get("recorrida") or {}
     _per_rec = (f"del {_rp['desde'][1]}/{_rp['desde'][0]:02d} al {_rp['hasta'][1]}/{_rp['hasta'][0]:02d}" if _rp else "")
-    _txt_rec_exp = (f"{_per_rec[0].upper() + _per_rec[1:]} no se da probabilidad: en Bordenave no distinguió las semanas con flujos "
+    _txt_rec_exp = (f"{_per_rec[0].upper() + _per_rec[1:]} no se da probabilidad: no distinguió las semanas con flujos "
                     "tardíos (AUC ≤ 0,5), así que se recomienda recorrer los lotes cada 2 semanas para definir el uso de un graminicida "
                     "postemergente." if _rp else "")
     clima = al.limpiar_clima(meteo)
@@ -695,15 +695,14 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                + (" con la infestación indicada para el lote" if infestacion else " con la densidad registrada en el sitio")
                + ". Abajo, la "
                + (f"emergencia acumulada esperada según el tiempo térmico acumulado desde las primeras plántulas ({_prim_tt:%d/%m}): "
-                  "curva media y rango 10–90 % de las campañas de Bordenave; más allá del clima disponible se usan temperaturas "
+                  f"curva media y rango 10–90 % de las campañas {'de ' + localidad if calibrada_aqui else 'de referencia'}; más allá del clima disponible se usan temperaturas "
                   "medias históricas. Sin fecha de primeras plántulas se usa el calendario. "
                   if usa_tt else "emergencia acumulada esperada para Bordenave: curva media y rango 10–90 % de sus campañas (error típico ±13 puntos). "
                   if calibrada_aqui else (f"emergencia acumulada esperada según el calendario propio de {localidad} (curva media y "
                   f"rango {rango_txt} de las campañas {_anios}"
-                  + ("). " if calendario_en_alerta else "; la probabilidad de gran flujo usa el calendario de Bordenave). ")
+                  + ("). " if calendario_en_alerta else "; la probabilidad de gran flujo usa el calendario de referencia regional). ")
                   + ("Desde las primeras plántulas, la probabilidad incluye el agotamiento de la cohorte. " if agotamiento else "")
-                  if calendario_local else "emergencia acumulada esperada según el calendario de Bordenave (curva media y rango 10–90 %), "
-                  "usado como referencia regional. "))
+                  if calendario_local else "emergencia acumulada esperada según el calendario de referencia regional (curva media y rango 10–90 %). "))
                + (f"La curva arranca el día de las primeras plántulas ({_p0:%d/%m}) en la fracción típica ya emergida al verlas. "
                   if usa_prim else "")
                + "La franja violeta es la ventana de control post-emergente en tiempo térmico desde el inicio; el tramo claro con borde "
@@ -733,7 +732,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                 f"2 % de la campaña; aviso desde {al.UMBRAL_TARDIA:.0%} (25 % sin datos del lote). Es la misma alerta recalibrada para esa época, en la que los "
                 "grandes flujos (≥ 5 %) son raros pero pocas plantas por semana importan para decidir la fecha de siembra. "
                 + _txt_rec_exp + "\n\n"
-                "| Información | AUC Bordenave | Detectadas | Semanas marcadas | AUC otras localidades | Detectadas | Marcadas |\n|---|---|---|---|---|---|---|\n"
+                "| Información | AUC calibración | Detectadas | Semanas marcadas | AUC otras localidades | Detectadas | Marcadas |\n|---|---|---|---|---|---|---|\n"
                 + "\n".join(f"| {k} | {d['auc']:.2f} | {d['det']:.0%} | {d['marcadas']:.0%} | "
                              + (f"{o['auc']:.2f} | {o['det']:.0%} | {o['marcadas']:.0%} |" if (o := tv['validacion_otras'].get(k if k != '+ conteos semanales' else '+ conteos')) else "— | — | — |")
                              for k, d in tv["validacion_bordenave"].items())
