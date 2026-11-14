@@ -177,9 +177,9 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     else:
         _curva = None
         rango_txt = "10–90 %"
-        titulo_cal = "Emergencia acumulada esperada (calendario de 17 campañas)"
-    st.subheader("🔔 Alerta de grandes flujos validada (17 campañas)" if calibrada_aqui
-                 else f"🔔 Alerta de grandes flujos · {localidad} (modelo calibrado en Bordenave, 17 campañas)")
+        titulo_cal = "Emergencia acumulada esperada (calendario de Bordenave)"
+    st.subheader("🔔 Alerta de grandes flujos validada" if calibrada_aqui
+                 else f"🔔 Alerta de grandes flujos · {localidad} (modelo calibrado en Bordenave)")
     st.caption("Probabilidad de que en los próximos 7 días emerja ≥ 5 % de la campaña. Combina el calendario medio de "
                "LOLMU, la respuesta a las lluvias ya registradas y, si se informa, la fecha de las primeras plántulas "
                "del lote. Independiente del motor PREDWEEM de arriba.")
@@ -343,7 +343,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             "<div style='background:#ede9fe;color:#3b0764;padding:0.75rem 1.1rem;border-radius:0.6rem;margin:-0.3rem 0 0.8rem 0;font-size:1.0rem'>"
             f"🌾 <b>Flujos tardíos · Recorrer cada {rec['cada_dias'] // 7} semanas</b> · {rec['texto']}"
             f"<br><span style='font-size:0.88rem;opacity:0.9'>Del {rec['desde']:%d/%m} al {rec['hasta']:%d/%m} no se muestra una probabilidad de flujo "
-            "tardío: en 17 campañas de Bordenave no distinguió las semanas con emergencia de las demás.</span></div>",
+            "tardío: en Bordenave no distinguió las semanas con emergencia de las demás.</span></div>",
             unsafe_allow_html=True)
     clima = al.limpiar_clima(meteo)
     dg = al.tiempo_termico(clima, **tt)
@@ -413,8 +413,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             return f"mediana {fm(np.median(vv))}, entre {fm(vv.min())} y {fm(vv.max())} según la campaña"
 
         with st.container(border=True):
-            _base = ((f"datos de {_r['sitio']}, {_r['n']} campañas" if _r["fuente"] == "local"
-                      else f"referencia regional, {_r['n']} campañas: {_r['sitio']} todavía tiene pocos datos")
+            _base = ((f"datos de {_r['sitio']}" if _r["fuente"] == "local"
+                      else f"referencia regional: {_r['sitio']} todavía tiene pocos datos")
                      + (f"; infestación {_inf.lower()} del lote" if _inf else ""))
             st.markdown(f"**🧪 Residual a la siembra · siembra {'de referencia ' if _ref else ''}{_r['siembra']:%d/%m}** ({_base}) · "
                         f"ventana de acción del residual: del {_r['siembra'] + pd.Timedelta(days=_v0):%d/%m} al "
@@ -479,7 +479,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             return modelo.curva_tiempo_termico(_d, _p, fechas, localidad)
 
         rango_txt = "10–90 %"
-        titulo_cal = "Emergencia acumulada esperada (tiempo térmico desde las primeras plántulas, 17 campañas)"
+        titulo_cal = "Emergencia acumulada esperada (tiempo térmico desde las primeras plántulas)"
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, row_heights=[0.44, 0.13, 0.43], vertical_spacing=0.05,
                         subplot_titles=("Probabilidad de un gran flujo en los próximos 7 días", "Semáforo semanal", titulo_cal))
     fig.add_hrect(y0=100 * al.ATENCION, y1=100 * al.ALERTA, fillcolor=COLOR["atencion"], opacity=0.08, line_width=0, exclude_empty_subplots=False, row=1, col=1)
@@ -489,6 +489,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     fig.add_hline(y=100 * al.ALERTA, line_dash="dash", line_color=COLOR["alerta"], annotation_text=f"Alerta ≥ {al.ALERTA:.0%}",
                   annotation_position="top left", annotation_font_color=COLOR["alerta"], exclude_empty_subplots=False, row=1, col=1)
     x_fin = max(emision + pd.Timedelta(days=14), pd.Timestamp(anio, 6, 30))
+    if siembra is not None:  # que se vea la fecha de siembra prevista
+        x_fin = max(x_fin, pd.Timestamp(siembra) + pd.Timedelta(days=10))
     if ancla is not None:
         estimado = r["primeras_plantulas"] is None
         f_ctl, f_lim = _fecha_tt(dgv, ancla, tt_control), _fecha_tt(dgv, ancla, tt_limite)
@@ -596,7 +598,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                                              line=dict(color="white", width=1)),
                                  customdata=cc["PLM2"], hovertemplate="Conteo %{x|%d/%m}: %{customdata:.0f} plántulas<extra></extra>"),
                       row=1, col=1)
-    # emergencia acumulada: curva media y rango 10–90 % de las 17 campañas; marca del valor esperado a la fecha de emisión
+    # emergencia acumulada: curva media y rango 10–90 % de las campañas; marca del valor esperado a la fecha de emisión
     curva_de = _curva or modelo.curva
     cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 15), x_fin))
     # conteos en cero antes de las primeras plántulas: la curva queda en 0 hasta la mitad del intervalo entre el último cero
@@ -658,6 +660,14 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     fig.update_yaxes(range=[0, 2], tickvals=[0.5, 1.5], ticktext=["Flujos tardíos<br>(≥ 2 %)", "Grandes flujos<br>(≥ 5 %)"], showgrid=False,
                      zeroline=False, fixedrange=True, row=2, col=1)
     fig.update_yaxes(title_text="% de la campaña", range=[0, 102], row=3, col=1)
+    if siembra is not None:  # fecha de siembra prevista: línea y flecha con cartel
+        _fs = pd.Timestamp(siembra)
+        for fila in (1, 2, 3):
+            fig.add_vline(x=_fs, line_width=2, line_color="#15803d", exclude_empty_subplots=False, row=fila, col=1)
+        fig.add_annotation(x=_fs, y=78, xref="x", yref="y", showarrow=True, arrowhead=2, arrowsize=1.3, arrowwidth=2,
+                           arrowcolor="#15803d", ax=0, ay=-42, text=f"<b>🌱 Siembra prevista</b><br>{_fs:%d/%m}",
+                           font=dict(size=12, color="#14532d"), bgcolor="rgba(240,253,244,0.95)", bordercolor="#15803d",
+                           borderwidth=1.5, borderpad=4)
     fig.update_xaxes(range=[pd.Timestamp(anio, 2, 1), x_fin], tickformat="%d/%m")
     fig.update_layout(height=780, margin=dict(t=40, b=10, l=10, r=10), showlegend=False, hovermode="closest",
                       title=dict(text="Alerta de grandes flujos, emergencia acumulada y ventana de control", font=dict(size=15)))
@@ -674,15 +684,15 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                + (f"; del {v1 + pd.Timedelta(days=1):%d/%m} al {v1b:%d/%m}, en gris, rige la recomendación de recorrer cada 2 semanas" if _rec else "")
                + "; las celdas con borde punteado son los próximos 7 días. Abajo, la "
                + (f"emergencia acumulada esperada según el tiempo térmico acumulado desde las primeras plántulas ({_prim_tt:%d/%m}): "
-                  "curva media y rango 10–90 % de 17 campañas de Bordenave; más allá del clima disponible se usan temperaturas "
+                  "curva media y rango 10–90 % de las campañas de Bordenave; más allá del clima disponible se usan temperaturas "
                   "medias históricas. Sin fecha de primeras plántulas se usa el calendario. "
-                  if usa_tt else "emergencia acumulada esperada para Bordenave: curva media y rango 10–90 % de 17 campañas (error típico ±13 puntos). "
+                  if usa_tt else "emergencia acumulada esperada para Bordenave: curva media y rango 10–90 % de sus campañas (error típico ±13 puntos). "
                   if calibrada_aqui else (f"emergencia acumulada esperada según el calendario propio de {localidad} (curva media y "
                   f"rango {rango_txt} de las campañas {_anios}"
                   + ("). " if calendario_en_alerta else "; la probabilidad de gran flujo usa el calendario de Bordenave). ")
                   + ("Desde las primeras plántulas, la probabilidad incluye el agotamiento de la cohorte. " if agotamiento else "")
-                  if calendario_local else "emergencia acumulada esperada según el calendario de Bordenave (curva media y rango 10–90 % "
-                  "de 17 campañas), usado como referencia regional. "))
+                  if calendario_local else "emergencia acumulada esperada según el calendario de Bordenave (curva media y rango 10–90 %), "
+                  "usado como referencia regional. "))
                + (f"La curva arranca el día de las primeras plántulas ({_p0:%d/%m}) en la fracción típica ya emergida al verlas. "
                   if usa_prim else "")
                + "La franja violeta es la ventana de control post-emergente en tiempo térmico desde el inicio; el tramo claro con borde "

@@ -58,5 +58,6 @@ Ver `COPYRIGHT.md`. Copyright © 2026 Guillermo R. Chantre / PREDWEEM. Todos los
 
 | Versión | Cambios |
 |---|---|
+| 1.2.0 | La fecha de siembra prevista se marca en el gráfico con una línea y una flecha con cartel. Se quitan de la app las menciones a «17 campañas» (título de la alerta, curvas y textos). |
 | 1.1.0 | Dato opcional «Infestación de raigrás del lote» (baja / media / alta): el riesgo para el residual en pl/m² se calcula con esa densidad en lugar de la del sitio, con recomendaciones acordes (medio: residual opcional; bajo: no hace falta). |
 | 1.0.0 | Primera versión: código de las 8 apps al 13/11/2026. |

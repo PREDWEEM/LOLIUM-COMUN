@@ -2,10 +2,10 @@
 """Alerta validada de flushes de Lolium multiflorum (Bordenave) por niveles de información.
 
 Señales, todas disponibles a la fecha de emisión:
-  * calendario: emergencia esperada en los próximos 7 días según la curva media de 17 campañas de LOLMU;
+  * calendario: emergencia esperada en los próximos 7 días según la curva media de las campañas de LOLMU de Bordenave;
   * lluvia: respuesta a las lluvias registradas hasta la fecha (rezago gamma en tiempo térmico de suelo, mayor
     respuesta sobre suelo seco y tamaño del pulso según la época del año), con el núcleo del modelo de pulsos ajustado
-    con las 17 campañas de Lolium multiflorum de Bordenave;
+    con las campañas de Lolium multiflorum de Bordenave;
   * inicio: tiempo térmico desde la fecha en que se vieron las primeras plántulas (si se informó);
   * conteos: fracción de lo contado que emergió en el último intervalo (si hay conteos).
 
@@ -47,7 +47,7 @@ TOPE_CERO = 0.14  # con un conteo reciente en cero y sin plántulas, la probabil
 # balance de agua y temperatura de suelo (5 cm) del modelo de pulsos de Bordenave (sin reajustar)
 SUELO = dict(ema_alpha=0.426, ts_a0=3.39, ts_a1=-0.66, W=75.6, k_loss=0.0327, Tb=5.0)
 # núcleo de respuesta a la lluvia: modelo de pulsos ajustado por mínimos cuadrados no lineales a los incrementos semanales
-# de emergencia de las 17 campañas de Lolium multiflorum de Bordenave. Tamaño del pulso:
+# de emergencia de las campañas de Lolium multiflorum de Bordenave. Tamaño del pulso:
 # exp(a0 + a1·sen(2π·día/365) + a2·cos(2π·día/365) + delta·(1 − S⁻/W)), con el día del año de la lluvia (máximo a fines
 # de mayo); rezago gamma en tiempo térmico de suelo con forma k y escala ``escala`` (mediana 114 °Cd, p90 252 °Cd).
 NUCLEO = dict(a0=-5.1047, a1=1.8626, a2=-2.1532, delta=0.5124, k=float(np.exp(0.8052)), escala=float(np.exp(4.0843)))
