@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """Control de acceso de las apps PREDWEEM: ingreso con cuenta de Google y lista de usuarios aprobados.
 
+Dos modos:
+
+- **Registro libre** (``registro_libre = true``): cualquier cuenta de Google entra, sin aprobación. Sirve para saber
+  quién usa las apps manteniendo el acceso libre y gratuito. Opcionalmente, cada ingreso se anota en un formulario
+  de Google (``[acceso.registro]``), cuyas respuestas quedan en una planilla.
+- **Con aprobación** (por defecto): solo entran los administradores y los emails aprobados en la planilla.
+
 Se activa solo cuando los secretos de la app (Streamlit Community Cloud → Settings → Secrets)
 incluyen la sección ``[acceso]`` con ``activo = true`` y la sección ``[auth]`` de Google.
 Mientras no estén configurados, la app funciona como siempre (sin login).
@@ -21,6 +28,13 @@ Secretos esperados::
     # (o varias: lista_url = ["<planilla manual>", "<respuestas del formulario>"])
     contacto = "chantreguillermo@gmail.com"               # a quién se pide acceso
     formulario_url = "https://forms.gle/..."              # opcional: formulario de solicitud
+    registro_libre = true                                 # cualquier cuenta de Google entra (sin lista)
+
+    [acceso.registro]                                     # opcional, con registro libre: anota cada ingreso
+    url = "https://docs.google.com/forms/d/e/<ID>/formResponse"
+    email = "entry.1111111111"                            # campo del formulario para el email
+    nombre = "entry.2222222222"                           # campo para el nombre
+    app = "entry.3333333333"                              # campo para la app (localidad)
 
 La planilla publicada como CSV debe tener una columna ``email``; si además tiene una columna
 ``estado``, solo se habilitan las filas con ``aprobado`` (o ``sí``/``si``/``ok``).
@@ -133,25 +147,56 @@ def _conectado() -> bool:
         return False
 
 
+def _anotar_ingreso(cfg: dict, nombre_app: str) -> None:
+    """Anota el ingreso (email, nombre, app) en el formulario de ``[acceso.registro]``, una vez por sesión.
+
+    Un fallo no impide usar la app."""
+    reg = dict(cfg.get("registro", {}) or {})
+    url = str(reg.get("url", "")).strip()
+    clave = f"_predweem_ingreso_anotado_{nombre_app}"
+    if not url or st.session_state.get(clave):
+        return
+    st.session_state[clave] = True
+    datos = {}
+    for campo, valor in (("email", st.user.get("email", "")), ("nombre", st.user.get("name", "")), ("app", nombre_app)):
+        entrada = str(reg.get(campo, "")).strip()
+        if entrada:
+            datos[entrada] = str(valor or "")
+    if not datos:
+        return
+    try:
+        pedido = urllib.request.Request(url, data=urllib.parse.urlencode(datos).encode("utf-8"),
+                                        headers={"User-Agent": "Mozilla/5.0 PREDWEEM"})
+        urllib.request.urlopen(pedido, timeout=10).read()  # noqa: S310 (URL fija de los secretos)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def requerir_acceso(nombre_app: str) -> None:
-    """Detiene la app hasta que el usuario ingresa con Google y su email está aprobado."""
+    """Detiene la app hasta que el usuario ingresa con Google y, salvo registro libre, su email está aprobado."""
     cfg = _config()
     if not cfg.get("activo", False):
         return  # control de acceso todavía no configurado: la app sigue abierta
+    libre = bool(cfg.get("registro_libre", False))
 
     contacto = str(cfg.get("contacto", _CONTACTO_POR_DEFECTO))
 
     if not _conectado():
         _encabezado(nombre_app)
-        st.info("El acceso a las aplicaciones PREDWEEM es para usuarios registrados. Ingresá con tu cuenta de Google.")
+        st.info("El acceso a las aplicaciones PREDWEEM es libre y gratuito, con registro: ingresá con tu cuenta de Google."
+                if libre else "El acceso a las aplicaciones PREDWEEM es para usuarios registrados. Ingresá con tu cuenta de Google.")
         st.button("Ingresar con Google", type="primary", icon=":material/login:", on_click=st.login, width="stretch")
         st.caption(
-            "Si es la primera vez, al ingresar vas a poder solicitar el acceso. "
-            "Solo se usa tu nombre y tu email para identificarte."
+            ("Solo se usa tu nombre y tu email para saber quién usa las apps; no se comparten con terceros."
+             if libre else "Si es la primera vez, al ingresar vas a poder solicitar el acceso. "
+             "Solo se usa tu nombre y tu email para identificarte.")
         )
         st.stop()
 
     email = str(st.user.get("email", "")).strip().lower()
+    if libre:
+        _anotar_ingreso(cfg, nombre_app)
+        return
     aprobados, fallidas, total = _aprobados(cfg)
     if email and email in aprobados:
         return
