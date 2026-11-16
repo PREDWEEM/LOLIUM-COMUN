@@ -379,24 +379,29 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     p, nivel = r["probabilidad"], r["nivel"]
     caja_hacer = st.container()  # «Qué hacer esta semana»: se completa más abajo, con todos los resultados
     hacer = []
-    st.markdown(
-        f"<div style='background:{COLOR[nivel]};color:white;padding:0.9rem 1.1rem;border-radius:0.6rem;margin:0.4rem 0 0.8rem 0;"
-        f"font-size:1.05rem'><b>{emision:%d/%m/%Y}</b> · <b>{NOMBRE[nivel]}</b> · probabilidad de un gran flujo (≥ 5 % de la campaña) en los próximos 7 días: "
-        + (f"<b>{p:.0%}</b>. Conteo en cero el {r['cero_reciente']:%d/%m}: esta semana ya pasó sin plántulas en el lote, por eso la "
-           f"probabilidad es 0 % (por clima sería {r['probabilidad_clima']:.0%}). "
-           "La semana que sigue al último conteo en cero se evalúa normalmente.<br>" if r.get("cero_reciente") is not None else
-           f"<b>{p:.0%}</b>. {TEXTO_TOPE if r.get('tope_aplicado') else TEXTO[nivel]}<br>")
-        + f"<span style='font-size:0.9rem;opacity:0.9'>Información usada: {'clima + conteo en cero posterior (semana sin plántulas)' if r.get('cero_reciente') is not None else INFO[r['nivel_info']]}.</span></div>",
-        unsafe_allow_html=True)
+    # orden cronológico de la temporada: qué hacer → inicio (recorrer hasta ver plántulas) → grandes flujos y graminicida
+    # de barbecho → residual a la siembra → flujos tardíos (agosto–octubre)
+    caja_inicio, caja_alerta, caja_residual, caja_tardios = (st.container() for _ in range(4))
+    with caja_alerta:
+        st.markdown(
+            f"<div style='background:{COLOR[nivel]};color:white;padding:0.9rem 1.1rem;border-radius:0.6rem;margin:0.4rem 0 0.8rem 0;"
+            f"font-size:1.05rem'><b>{emision:%d/%m/%Y}</b> · <b>{NOMBRE[nivel]}</b> · probabilidad de un gran flujo (≥ 5 % de la campaña) en los próximos 7 días: "
+            + (f"<b>{p:.0%}</b>. Conteo en cero el {r['cero_reciente']:%d/%m}: esta semana ya pasó sin plántulas en el lote, por eso la "
+               f"probabilidad es 0 % (por clima sería {r['probabilidad_clima']:.0%}). "
+               "La semana que sigue al último conteo en cero se evalúa normalmente.<br>" if r.get("cero_reciente") is not None else
+               f"<b>{p:.0%}</b>. {TEXTO_TOPE if r.get('tope_aplicado') else TEXTO[nivel]}<br>")
+            + f"<span style='font-size:0.9rem;opacity:0.9'>Información usada: {'clima + conteo en cero posterior (semana sin plántulas)' if r.get('cero_reciente') is not None else INFO[r['nivel_info']]}.</span></div>",
+            unsafe_allow_html=True)
     # flujos tardíos: solo la recorrida del 1/08 al 1/10; antes, la emergencia posterior a la siembra se evalúa con el
     # riesgo para el residual (la probabilidad de flujo tardío de mayo–junio ya no se muestra)
-    if r.get("recorrida_tardia"):
-        rec = r["recorrida_tardia"]
-        hacer.append(f"🌾 **Recorrer los lotes cada {rec['cada_dias'] // 7} semanas** para definir uso de graminicida postemergente.")
-        st.markdown(
-            "<div style='background:#ede9fe;color:#3b0764;padding:0.75rem 1.1rem;border-radius:0.6rem;margin:-0.3rem 0 0.8rem 0;font-size:1.0rem'>"
-            f"🌾 <b>Flujos tardíos · Recorrer cada {rec['cada_dias'] // 7} semanas</b> · {rec['texto']}</div>",
-            unsafe_allow_html=True)
+    with caja_tardios:
+        if r.get("recorrida_tardia"):
+            rec = r["recorrida_tardia"]
+            hacer.append(f"🌾 **Recorrer los lotes cada {rec['cada_dias'] // 7} semanas** para definir uso de graminicida postemergente.")
+            st.markdown(
+                "<div style='background:#ede9fe;color:#3b0764;padding:0.75rem 1.1rem;border-radius:0.6rem;margin:-0.3rem 0 0.8rem 0;font-size:1.0rem'>"
+                f"🌾 <b>Flujos tardíos · Recorrer cada {rec['cada_dias'] // 7} semanas</b> · {rec['texto']}</div>",
+                unsafe_allow_html=True)
     _rp = (modelo.p.get("tardia") or {}).get("recorrida") or {}
     _per_rec = (f"del {_rp['desde'][1]}/{_rp['desde'][0]:02d} al {_rp['hasta'][1]}/{_rp['hasta'][0]:02d}" if _rp else "")
     _txt_rec_exp = (f"{_per_rec[0].upper() + _per_rec[1:]} no se da probabilidad: no distinguió las semanas con flujos "
@@ -409,126 +414,129 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     # precisión suficiente (error medio de 10–20 días, del orden del ancho de la ventana), así que no se usa un inicio estimado
     # (``inicio_predicho`` se acepta por compatibilidad y se ignora)
     ancla, ancla_txt = (r["primeras_plantulas"], "primeras plántulas observadas") if r["primeras_plantulas"] is not None else (None, None)
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Probabilidad de gran flujo (7 días)", f"{p:.0%}", help="Tasa histórica: ~25 % de las semanas de campaña."
-              + (f" Conteo en cero el {r['cero_reciente']:%d/%m}: semana ya pasada sin plántulas: 0 % (por clima {r['probabilidad_clima']:.0%})."
-                 if r.get("cero_reciente") is not None else ""))
-    m2.metric("Emergencia esperada por lluvias", f"{100 * r['senales']['lluvia']:.1f} %",
-              help="Respuesta relativa a las lluvias registradas hasta la fecha (señal, no % de la campaña).")
-    if ancla is not None:
-        tt_hoy = float(dg[(dg.index >= ancla) & (dg.index <= emision)].sum())
-        f_ctl, f_lim = _fecha_tt(dgv, ancla, tt_control), _fecha_tt(dgv, ancla, tt_limite)
-        _est = lambda d: d is not None and d > ult_tt  # noqa: E731
-        _fase = _fase_raigras(tt_hoy, tt_control, tt_limite)
-        m3.metric("Tiempo térmico desde el inicio", f"{tt_hoy:.0f} °Cd",
-                  help=f"Desde el {ancla:%d/%m} ({ancla_txt}). Raigrás: {_fase}.")
-        m4.metric(TIT_GRAMINICIDA(tt_control, tt_limite),
-                  (f"{f_ctl:%d/%m}" + (" (estimada)" if _est(f_ctl) else "")) if f_ctl is not None else "—",
-                  help=(f"Ventana óptima del graminicida de barbecho: {tt_control:.0f}–{tt_limite:.0f} °Cd desde las primeras plántulas"
-                        + (", raigrás de 4 a 6 macollos" if (tt_control, tt_limite) == (600.0, 800.0) else "") + ". "
-                        + (f"Fin de la ventana ({tt_limite:.0f} °Cd): {f_lim:%d/%m}" + (" (estimada)" if _est(f_lim) else "") + "."
-                           if f_lim is not None else ""))
-                       + (f" Las fechas estimadas suman el clima medio desde el {ult_tt + pd.Timedelta(days=1):%d/%m}; se corrigen "
-                          "a medida que se carga el clima." if _est(f_lim) else " Alcanzada con el clima registrado.")
-                       )
-    else:
-        m3.metric("Tiempo térmico desde el inicio", "—", help="Informe la fecha de las primeras plántulas para iniciar el reloj térmico.")
-        m4.metric(TIT_GRAMINICIDA(tt_control, tt_limite), "—",
-                  help="Informe la fecha de las primeras plántulas para calcular la ventana del graminicida de barbecho. El inicio de la emergencia no se "
-                       "estima con el clima: ninguna regla lo predijo con precisión suficiente (error medio de 10–20 días).")
-    # debajo de las tarjetas: riesgo de nacimientos para el residual a la siembra
-    rr = al.riesgo_residual(pd.Timestamp(siembra), modelo, infestacion) if siembra is not None else None
-    if modelo.p.get("residual"):
-        _ref = rr is None
-        _r = rr if rr is not None else al.riesgo_residual(pd.Timestamp(anio, 6, 1), modelo, infestacion)
-        _ico = {"Muy alto": "🔴", "Alto": "🔴", "Medio": "🟡", "Bajo": "🟢"}  # mismos colores que el semáforo
-        _pc = lambda v: f"{100 * v:.1f} %".replace(".", ",")  # noqa: E731
-        _rs = _r["residual"]
-        _v0, _v1 = _r["ventana"]
-        _inf, _dl = _r.get("infestacion"), _r.get("densidad_lote")
-        _rec_res = ({"Muy alto": "Usar residual", "Alto": "Residual recomendado", "Medio": "Residual opcional",
-                     "Bajo": "No necesario"} if _inf else
-                    {"Muy alto": "Usar residual", "Alto": "Residual recomendado", "Medio": "Según infestación",
-                     "Bajo": "Solo si muy infestado"})[_rs["nivel"]]
-        _txt_dens = (f"infestación {_inf.lower()} del lote (unas {_dl:,.0f} pl/m² por campaña)".replace(",", ".") if _inf else
-                     f"densidad registrada en {_r['sitio']} (referencia {_r['densidad_referencia']:,.0f} pl/m² por campaña)".replace(",", "."))
+    with caja_alerta:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Probabilidad de gran flujo (7 días)", f"{p:.0%}", help="Tasa histórica: ~25 % de las semanas de campaña."
+                  + (f" Conteo en cero el {r['cero_reciente']:%d/%m}: semana ya pasada sin plántulas: 0 % (por clima {r['probabilidad_clima']:.0%})."
+                     if r.get("cero_reciente") is not None else ""))
+        m2.metric("Emergencia esperada por lluvias", f"{100 * r['senales']['lluvia']:.1f} %",
+                  help="Respuesta relativa a las lluvias registradas hasta la fecha (señal, no % de la campaña).")
+        if ancla is not None:
+            tt_hoy = float(dg[(dg.index >= ancla) & (dg.index <= emision)].sum())
+            f_ctl, f_lim = _fecha_tt(dgv, ancla, tt_control), _fecha_tt(dgv, ancla, tt_limite)
+            _est = lambda d: d is not None and d > ult_tt  # noqa: E731
+            _fase = _fase_raigras(tt_hoy, tt_control, tt_limite)
+            m3.metric("Tiempo térmico desde el inicio", f"{tt_hoy:.0f} °Cd",
+                      help=f"Desde el {ancla:%d/%m} ({ancla_txt}). Raigrás: {_fase}.")
+            m4.metric(TIT_GRAMINICIDA(tt_control, tt_limite),
+                      (f"{f_ctl:%d/%m}" + (" (estimada)" if _est(f_ctl) else "")) if f_ctl is not None else "—",
+                      help=(f"Ventana óptima del graminicida de barbecho: {tt_control:.0f}–{tt_limite:.0f} °Cd desde las primeras plántulas"
+                            + (", raigrás de 4 a 6 macollos" if (tt_control, tt_limite) == (600.0, 800.0) else "") + ". "
+                            + (f"Fin de la ventana ({tt_limite:.0f} °Cd): {f_lim:%d/%m}" + (" (estimada)" if _est(f_lim) else "") + "."
+                               if f_lim is not None else ""))
+                           + (f" Las fechas estimadas suman el clima medio desde el {ult_tt + pd.Timedelta(days=1):%d/%m}; se corrigen "
+                              "a medida que se carga el clima." if _est(f_lim) else " Alcanzada con el clima registrado.")
+                           )
+        else:
+            m3.metric("Tiempo térmico desde el inicio", "—", help="Informe la fecha de las primeras plántulas para iniciar el reloj térmico.")
+            m4.metric(TIT_GRAMINICIDA(tt_control, tt_limite), "—",
+                      help="Informe la fecha de las primeras plántulas para calcular la ventana del graminicida de barbecho. El inicio de la emergencia no se "
+                           "estima con el clima: ninguna regla lo predijo con precisión suficiente (error medio de 10–20 días).")
+    with caja_residual:
+        # debajo de las tarjetas: riesgo de nacimientos para el residual a la siembra
+        rr = al.riesgo_residual(pd.Timestamp(siembra), modelo, infestacion) if siembra is not None else None
+        if modelo.p.get("residual"):
+            _ref = rr is None
+            _r = rr if rr is not None else al.riesgo_residual(pd.Timestamp(anio, 6, 1), modelo, infestacion)
+            _ico = {"Muy alto": "🔴", "Alto": "🔴", "Medio": "🟡", "Bajo": "🟢"}  # mismos colores que el semáforo
+            _pc = lambda v: f"{100 * v:.1f} %".replace(".", ",")  # noqa: E731
+            _rs = _r["residual"]
+            _v0, _v1 = _r["ventana"]
+            _inf, _dl = _r.get("infestacion"), _r.get("densidad_lote")
+            _rec_res = ({"Muy alto": "Usar residual", "Alto": "Residual recomendado", "Medio": "Residual opcional",
+                         "Bajo": "No necesario"} if _inf else
+                        {"Muy alto": "Usar residual", "Alto": "Residual recomendado", "Medio": "Según infestación",
+                         "Bajo": "Solo si muy infestado"})[_rs["nivel"]]
+            _txt_dens = (f"infestación {_inf.lower()} del lote (unas {_dl:,.0f} pl/m² por campaña)".replace(",", ".") if _inf else
+                         f"densidad registrada en {_r['sitio']} (referencia {_r['densidad_referencia']:,.0f} pl/m² por campaña)".replace(",", "."))
 
-        _dens = _r.get("por_densidad")
-        _pl = lambda v: f"{v:.0f} pl/m²"  # noqa: E731
+            _dens = _r.get("por_densidad")
+            _pl = lambda v: f"{v:.0f} pl/m²"  # noqa: E731
 
-        def _dist(x):
-            g = ((x["plm2_ge50"], x["plm2_ge20"], x["plm2_ge5"]) if _dens else (x["ge5"], x["ge2"], x["ge05"]) if "ge05" in x else None)
-            if g is None or any(pd.isna(v) for v in g):
-                return ""
-            return " · ".join(f"{n} {100 * v:.0f} %" for n, v in (("muy alto", g[0]), ("alto", g[1] - g[0]),
-                                                                  ("medio", g[2] - g[1]), ("bajo", 1 - g[2])))
+            def _dist(x):
+                g = ((x["plm2_ge50"], x["plm2_ge20"], x["plm2_ge5"]) if _dens else (x["ge5"], x["ge2"], x["ge05"]) if "ge05" in x else None)
+                if g is None or any(pd.isna(v) for v in g):
+                    return ""
+                return " · ".join(f"{n} {100 * v:.0f} %" for n, v in (("muy alto", g[0]), ("alto", g[1] - g[0]),
+                                                                      ("medio", g[2] - g[1]), ("bajo", 1 - g[2])))
 
-        def _loc(x):
-            lo = x.get("locales_plm2") if _dens else x["locales"]
-            fm = _pl if _dens else _pc
-            if not lo:
-                return ""
-            if len(lo) <= 4:
-                return " · ".join(f"{a} {fm(v)}" for a, v in sorted(lo.items()))
-            vv = np.array(list(lo.values()))
-            return f"mediana {fm(np.median(vv))}, entre {fm(vv.min())} y {fm(vv.max())} según la campaña"
+            def _loc(x):
+                lo = x.get("locales_plm2") if _dens else x["locales"]
+                fm = _pl if _dens else _pc
+                if not lo:
+                    return ""
+                if len(lo) <= 4:
+                    return " · ".join(f"{a} {fm(v)}" for a, v in sorted(lo.items()))
+                vv = np.array(list(lo.values()))
+                return f"mediana {fm(np.median(vv))}, entre {fm(vv.min())} y {fm(vv.max())} según la campaña"
 
-        with st.container(border=True):
-            _base = ((f"datos de {_r['sitio']}" if _r["fuente"] == "local"
-                      else f"referencia regional: {_r['sitio']} todavía tiene pocos datos")
-                     + (f"; infestación {_inf.lower()} del lote" if _inf else ""))
-            st.markdown(f"**🧪 Residual a la siembra · siembra {'de referencia ' if _ref else ''}{_r['siembra']:%d/%m}** ({_base}) · "
-                        f"ventana de acción del residual: del {_r['siembra'] + pd.Timedelta(days=_v0):%d/%m} al "
-                        f"{_r['siembra'] + pd.Timedelta(days=_v1):%d/%m} ({-_v0} días antes a {_v1} días después de sembrar)"
-                        + (" — cargue la fecha de siembra prevista (arriba) para ver su caso" if _ref else ""))
-            _hn = (("Según las plantas que nacieron en ese período en una campaña típica (mediana): muy alto ≥ 50 pl/m², alto 20–50, "
-                    f"medio 5–20 y bajo < 5. Calculado con la {_txt_dens}"
-                    + ("." if _inf else "; en un lote con menos raigrás el riesgo es menor: indique la infestación del lote (arriba).") + " ") if _dens else
-                   "Según la emergencia típica (mediana) de la campaña en ese período: muy alto ≥ 5 % de la campaña, alto 2–5 %, "
-                   "medio 0,5–2 % y bajo < 0,5 %. ") + "Riesgo histórico: el modelo no anticipa cuánto nacerá en esta campaña."
-            _act = _lluvia_activacion(clima, rr["siembra"], ult_tt) if rr is not None else None
-            r1, r2, r3, *_r4 = st.columns(4 if _act is not None else 3)
-            r1.metric("Riesgo para el residual", f"{_ico[_rs['nivel']]} {_rs['nivel']}",
-                      help=f"Nacimientos entre {-_v0} días antes y {_v1} días después de la siembra, período de acción promedio del residual. " + _hn)
-            r2.metric(f"Nacimientos de −{-_v0} a +{_v1} días", f"{_pl(_rs['plm2'])} ({_pc(_rs['mediana'])})" if _dens else _pc(_rs["mediana"]),
-                      help=(f"Mediana de las plantas/m² que nacieron en la ventana y, entre paréntesis, la fracción de la campaña; en 1 de cada 10 "
-                            f"campañas, más de {_pl(_rs['plm2_p90'])}." if _dens else
-                            f"Mediana de la fracción de la campaña que emergió en la ventana; en 1 de cada 10 campañas, más de {_pc(_rs['p90'])}."))
-            r3.metric("Recomendación residual", _rec_res,
-                      help=("Muy alto: usar residual. Alto: residual recomendado. Medio: residual opcional. Bajo: no hace falta "
-                            "residual. " if _inf else
-                            "Muy alto: usar residual. Alto: residual recomendado. Medio: residual si el lote tiene alta infestación o "
-                            "antecedentes de raigrás. Bajo: residual solo en lotes muy infestados. ")
-                           + "Producto y dosis: consultar al asesor y la etiqueta.")
-            if _act is not None:
-                _r4[0].metric(f"Lluvia para activar ({DIAS_ACTIVACION} días)",
-                              ("—" if _act["mm"] is None else f"{_act['mm']:.0f} mm") + " · "
-                              + {"probable": "✅ probable", "dudosa": "⚠️ dudosa", "pendiente": "⏳ pendiente", "sin_datos": "sin pronóstico"}[_act["estado"]],
-                              help=_texto_activacion(_act, rr["siembra"]) + " Lluvia registrada y pronosticada a la fecha de emisión; "
-                                   "el mínimo exacto depende del producto (ver etiqueta).")
-            _lr = _loc(_rs)
-            st.caption((f"{_r['sitio']}, nacimientos en la ventana del residual: {_lr}. " if _lr else "")
-                       + (f"Campañas por nivel: {_dist(_rs)}. " if _dist(_rs) else "")
-                       + ((f"Plantas/m² con la {_txt_dens}."
-                           + ("" if _inf else " En un lote con menos raigrás el riesgo es menor: indique la infestación del lote (arriba).")) if _dens else
-                          "En lotes con alta infestación, aun una fracción chica puede ser más de 100 plantas/m²."))
-    if r["primeras_plantulas"] is None and emision.month <= 6:
-        st.markdown(_texto_muestreo_inicio(meteo, emision, conteos, modelo), unsafe_allow_html=True)
-    elif r["primeras_plantulas"] is None:
-        st.info("Sin fecha de primeras plántulas: la alerta usa solo el clima. Cuando aparezcan las primeras plántulas "
-                "en el lote, cargue esa fecha arriba: ancla el reloj térmico de la ventana del graminicida de barbecho y mejora la alerta.")
+            with st.container(border=True):
+                _base = ((f"datos de {_r['sitio']}" if _r["fuente"] == "local"
+                          else f"referencia regional: {_r['sitio']} todavía tiene pocos datos")
+                         + (f"; infestación {_inf.lower()} del lote" if _inf else ""))
+                st.markdown(f"**🧪 Residual a la siembra · siembra {'de referencia ' if _ref else ''}{_r['siembra']:%d/%m}** ({_base}) · "
+                            f"ventana de acción del residual: del {_r['siembra'] + pd.Timedelta(days=_v0):%d/%m} al "
+                            f"{_r['siembra'] + pd.Timedelta(days=_v1):%d/%m} ({-_v0} días antes a {_v1} días después de sembrar)"
+                            + (" — cargue la fecha de siembra prevista (arriba) para ver su caso" if _ref else ""))
+                _hn = (("Según las plantas que nacieron en ese período en una campaña típica (mediana): muy alto ≥ 50 pl/m², alto 20–50, "
+                        f"medio 5–20 y bajo < 5. Calculado con la {_txt_dens}"
+                        + ("." if _inf else "; en un lote con menos raigrás el riesgo es menor: indique la infestación del lote (arriba).") + " ") if _dens else
+                       "Según la emergencia típica (mediana) de la campaña en ese período: muy alto ≥ 5 % de la campaña, alto 2–5 %, "
+                       "medio 0,5–2 % y bajo < 0,5 %. ") + "Riesgo histórico: el modelo no anticipa cuánto nacerá en esta campaña."
+                _act = _lluvia_activacion(clima, rr["siembra"], ult_tt) if rr is not None else None
+                r1, r2, r3, *_r4 = st.columns(4 if _act is not None else 3)
+                r1.metric("Riesgo para el residual", f"{_ico[_rs['nivel']]} {_rs['nivel']}",
+                          help=f"Nacimientos entre {-_v0} días antes y {_v1} días después de la siembra, período de acción promedio del residual. " + _hn)
+                r2.metric(f"Nacimientos de −{-_v0} a +{_v1} días", f"{_pl(_rs['plm2'])} ({_pc(_rs['mediana'])})" if _dens else _pc(_rs["mediana"]),
+                          help=(f"Mediana de las plantas/m² que nacieron en la ventana y, entre paréntesis, la fracción de la campaña; en 1 de cada 10 "
+                                f"campañas, más de {_pl(_rs['plm2_p90'])}." if _dens else
+                                f"Mediana de la fracción de la campaña que emergió en la ventana; en 1 de cada 10 campañas, más de {_pc(_rs['p90'])}."))
+                r3.metric("Recomendación residual", _rec_res,
+                          help=("Muy alto: usar residual. Alto: residual recomendado. Medio: residual opcional. Bajo: no hace falta "
+                                "residual. " if _inf else
+                                "Muy alto: usar residual. Alto: residual recomendado. Medio: residual si el lote tiene alta infestación o "
+                                "antecedentes de raigrás. Bajo: residual solo en lotes muy infestados. ")
+                               + "Producto y dosis: consultar al asesor y la etiqueta.")
+                if _act is not None:
+                    _r4[0].metric(f"Lluvia para activar ({DIAS_ACTIVACION} días)",
+                                  ("—" if _act["mm"] is None else f"{_act['mm']:.0f} mm") + " · "
+                                  + {"probable": "✅ probable", "dudosa": "⚠️ dudosa", "pendiente": "⏳ pendiente", "sin_datos": "sin pronóstico"}[_act["estado"]],
+                                  help=_texto_activacion(_act, rr["siembra"]) + " Lluvia registrada y pronosticada a la fecha de emisión; "
+                                       "el mínimo exacto depende del producto (ver etiqueta).")
+                _lr = _loc(_rs)
+                st.caption((f"{_r['sitio']}, nacimientos en la ventana del residual: {_lr}. " if _lr else "")
+                           + (f"Campañas por nivel: {_dist(_rs)}. " if _dist(_rs) else "")
+                           + ((f"Plantas/m² con la {_txt_dens}."
+                               + ("" if _inf else " En un lote con menos raigrás el riesgo es menor: indique la infestación del lote (arriba).")) if _dens else
+                              "En lotes con alta infestación, aun una fracción chica puede ser más de 100 plantas/m²."))
+    with caja_inicio:
+        if r["primeras_plantulas"] is None and emision.month <= 6:
+            st.markdown(_texto_muestreo_inicio(meteo, emision, conteos, modelo), unsafe_allow_html=True)
+        elif r["primeras_plantulas"] is None:
+            st.info("Sin fecha de primeras plántulas: la alerta usa solo el clima. Cuando aparezcan las primeras plántulas "
+                    "en el lote, cargue esa fecha arriba: ancla el reloj térmico de la ventana del graminicida de barbecho y mejora la alerta.")
 
     # ---- «Qué hacer esta semana»: junta en un recuadro arriba lo que piden la alerta, la ventana, el residual y la recorrida
     _arriba = []
+    if r["primeras_plantulas"] is None and emision.month <= 6:
+        _arriba.append("👀 **Recorrer el lote cada semana** hasta ver las primeras plántulas y cargar esa fecha: con ella se calcula "
+                       "el momento del graminicida de barbecho.")
     if r.get("cero_reciente") is None:
         if nivel == "alerta":
             _arriba.append(f"🔴 **Gran flujo probable en los próximos 7 días ({p:.0%})**: recorrer el lote y preparar el control.")
         elif nivel == "atencion":
             _arriba.append(f"🟠 **Gran flujo posible ({p:.0%})**: " + ("recorrer el lote para detectar el inicio." if r.get("tope_aplicado")
                                                                         else "conviene mirar el lote esta semana."))
-    if r["primeras_plantulas"] is None and emision.month <= 6:
-        _arriba.append("👀 **Recorrer el lote cada semana** hasta ver las primeras plántulas y cargar esa fecha: con ella se calcula "
-                       "el momento del graminicida de barbecho.")
     if ancla is not None and f_ctl is not None and f_lim is not None:
         _4_6 = (tt_control, tt_limite) == (600.0, 800.0)
         _estim = "fechas estimadas con clima medio" if _est(f_ctl) or _est(f_lim) else ""
