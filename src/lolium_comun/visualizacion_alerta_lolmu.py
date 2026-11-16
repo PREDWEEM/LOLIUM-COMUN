@@ -169,6 +169,35 @@ def _pct(u: float) -> str:
     return f"{100 * u:g} %".replace(".", ",")
 
 
+# Fecha del primer conteo con plántulas en 31 campañas-sitio de la región (Bordenave 2008–2026, Lartigau, Tres Arroyos,
+# Azul, Olavarría, Balcarce, Pergamino y San Pedro), como (mes, día). Una fecha propia por sitio predijo peor que la
+# regional (error medio 13,9 contra 11,6 días, validación dejando una campaña afuera): la variación entre años dentro
+# de un sitio (desvío 19–22 días) supera a la variación entre sitios.
+PLANTULAS_VISTAS_REGION = [(1, 22), (1, 28), (2, 2), (2, 10), (2, 15), (2, 17), (2, 19), (2, 19), (2, 20), (2, 21), (2, 23),
+                           (2, 27), (2, 27), (2, 28), (2, 29), (3, 1), (3, 3), (3, 8), (3, 8), (3, 10), (3, 16), (3, 20),
+                           (3, 20), (3, 21), (3, 25), (3, 26), (3, 26), (3, 29), (4, 13), (4, 14), (4, 14)]
+
+
+def _texto_inicio_acumulado(emision: pd.Timestamp, vistas: list | None = None) -> str:
+    """«A esta fecha, en el X % de las campañas de la región ya se habían visto las primeras plántulas»."""
+    v = sorted(tuple(x) for x in (vistas or PLANTULAS_VISTAS_REGION))
+    n = len(v)
+    hoy = (emision.month, emision.day)
+    k = sum(1 for x in v if x <= hoy)
+    if k == 0:
+        return (f"A esta fecha, en ninguna de las {n} campañas de la región se habían visto plántulas; la más temprana, "
+                f"el {v[0][1]}/{v[0][0]:02d}.")
+    if k == n:
+        return (f"A esta fecha, en las {n} campañas de la región ya se habían visto las primeras plántulas (la más tardía, el "
+                f"{v[-1][1]}/{v[-1][0]:02d}): si el lote sigue sin plántulas, es un inicio más tardío que todos los registrados.")
+    i90 = int(np.ceil(0.9 * n)) - 1
+    txt = (f"A esta fecha, en el <b>{round(100 * k / n)} %</b> de las {n} campañas de la región ya se habían visto las primeras "
+           "plántulas")
+    if k <= i90:
+        txt += f"; hacia el {v[i90][1]}/{v[i90][0]:02d}, en el 90 %"
+    return txt + "."
+
+
 def _texto_muestreo_inicio(meteo: pd.DataFrame, emision: pd.Timestamp, conteos: pd.DataFrame | None, modelo) -> str:
     """Recuadro de muestreo mientras no se informan plántulas: el inicio no se puede anticipar bien con el clima."""
     k = modelo.p.get("inicio", {})
@@ -195,6 +224,7 @@ def _texto_muestreo_inicio(meteo: pd.DataFrame, emision: pd.Timestamp, conteos: 
         if not cc.empty and (cc["PLM2"] <= 0).all():
             ult = cc["Fecha"].max()
             partes.append(f"Último conteo en cero: {ult:%d/%m}; el próximo, el {ult + pd.Timedelta(days=7):%d/%m}.")
+    partes.append(_texto_inicio_acumulado(emision, k.get("plantulas_vistas")))
     partes.append(f"El inicio de la emergencia suele darse entre el <b>{p10:%d/%m} y el {p90:%d/%m}</b> (mediana {med:%d/%m}), pero "
                   "varía mucho entre años y lotes y el clima no lo anticipa bien: lo que más mejora la alerta es la fecha de las "
                   "primeras plántulas, que ancla la curva acumulada, el reloj térmico y la ventana del graminicida de barbecho.")
@@ -235,7 +265,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                  else f"🔔 Alerta de grandes flujos · {localidad}")
     st.caption("Probabilidad de que en los próximos 7 días emerja ≥ 5 % de la campaña. Combina el calendario medio de "
                "LOLMU, la respuesta a las lluvias ya registradas y, si se informa, la fecha de las primeras plántulas "
-               "del lote. Independiente del motor PREDWEEM de arriba.")
+               "del lote.")
     if meteo_raw is None or meteo_raw.empty:
         st.info("Sin datos meteorológicos.")
         return
