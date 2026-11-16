@@ -445,7 +445,11 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     with caja_residual:
         # debajo de las tarjetas: riesgo de nacimientos para el residual a la siembra
         rr = al.riesgo_residual(pd.Timestamp(siembra), modelo, infestacion) if siembra is not None else None
-        if modelo.p.get("residual"):
+        if modelo.p.get("residual") and rr is None:
+            # el riesgo para el residual se muestra recién cuando el usuario carga la fecha de siembra prevista
+            st.caption("🧪 **Residual a la siembra:** cargue la fecha de siembra prevista (arriba) para ver el riesgo de "
+                       "nacimientos en la ventana del residual.")
+        elif modelo.p.get("residual"):
             _ref = rr is None
             _r = rr if rr is not None else al.riesgo_residual(pd.Timestamp(anio, 6, 1), modelo, infestacion)
             _ico = {"Muy alto": "🔴", "Alto": "🔴", "Medio": "🟡", "Bajo": "🟢"}  # mismos colores que el semáforo
@@ -611,7 +615,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     x_fin = max(emision + pd.Timedelta(days=14), pd.Timestamp(anio, 6, 30))
     if siembra is not None:  # que se vea la fecha de siembra prevista
         x_fin = max(x_fin, pd.Timestamp(siembra) + pd.Timedelta(days=10))
-    if modelo.p.get("residual"):  # que se vea la fila del residual hasta el fin de la ventana de siembra
+    if modelo.p.get("residual") and siembra is not None:  # que se vea la fila del residual hasta el fin de la ventana de siembra
         x_fin = max(x_fin, pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(modelo.p["residual"]["dia"][-1])))
     if ancla is not None:
         estimado = r["primeras_plantulas"] is None
@@ -694,7 +698,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     _celda(emision, fin_prox, "flush", COLOR[nivel], f"Próximos 7 días ({sem}) · gran flujo: {NOMBRE[nivel]} ({100 * p:.0f} %)", futura=True)
     # fila del residual: riesgo histórico de nacimientos de −10 a +45 días si se siembra esa semana (1/05–31/07)
     res_semanas = []
-    if modelo.p.get("residual"):
+    if modelo.p.get("residual") and siembra is not None:  # solo con fecha de siembra cargada
         _dr = modelo.p["residual"]["dia"]  # (no reutilizar _d: lo usa la curva del calendario local)
         r0, r1 = pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_dr[0]) - 1), pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(_dr[-1]) - 1)
         # semanas ancladas en la fecha de siembra prevista: su celda empieza ese día y coincide con el recuadro del residual
@@ -784,7 +788,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                              text=[f"{100 * hoy['media']:.0f} % ({100 * hoy['p10']:.0f}–{100 * hoy['p90']:.0f} %)"], textposition="middle left",
                              textfont=dict(size=11, color="#14532d"), hoverinfo="skip", showlegend=False), row=3, col=1)
     fig.update_yaxes(title_text="Prob. de gran flujo (%)", range=[0, 106], row=1, col=1)
-    fig.update_yaxes(range=[0, 2], tickvals=[0.5, 1.5], ticktext=["Residual<br>(siembra)", "Grandes flujos<br>(≥ 5 %)"], showgrid=False,
+    fig.update_yaxes(range=[0, 2], tickvals=[0.5, 1.5], ticktext=["Residual<br>(siembra)" if res_semanas else "", "Grandes flujos<br>(≥ 5 %)"], showgrid=False,
                      zeroline=False, fixedrange=True, row=2, col=1)
     fig.update_yaxes(title_text="% de la campaña", range=[0, 102], row=3, col=1)
     if siembra is not None:  # fecha de siembra prevista: línea y flecha con cartel
@@ -806,7 +810,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                "información disponible ese día (color del punto = nivel); el tramo punteado, a la derecha de la fecha de emisión, es "
                "el pronóstico para los próximos 7 días. Un conteo en cero confirma las semanas que terminaron antes de esa fecha: "
                "esos tramos quedan en 0 %, igual que las semanas que terminaron más de 7 días antes de la fecha de primeras plántulas. En el medio, el semáforo semanal: la fila «Grandes flujos» repite el nivel de cada semana "
-               "(verde, naranja, rojo; la celda con borde punteado son los próximos 7 días) y la fila «Residual», del 1/05 al 31/07, el "
+               "(verde, naranja, rojo; la celda con borde punteado son los próximos 7 días) y, con fecha de siembra cargada, la fila «Residual», del 1/05 al 31/07, el "
                "riesgo de nacimientos para el residual si se siembra el primer día de esa semana (de 10 días antes a 45 días después de la siembra; con fecha de siembra cargada, las semanas empiezan ese día y su celda coincide con el recuadro): rojo, "
                "alto o muy alto (≥ 20 pl/m²; usar residual); amarillo, medio (5–20 pl/m²); verde, bajo (< 5 pl/m²)"
                + (" con la infestación indicada para el lote" if infestacion else " con la densidad registrada en el sitio")
