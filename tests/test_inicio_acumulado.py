@@ -1,6 +1,6 @@
 import pandas as pd
 
-from lolium_comun.visualizacion_alerta_lolmu import PLANTULAS_VISTAS_REGION, _texto_inicio_acumulado
+from lolium_comun.visualizacion_alerta_lolmu import PLANTULAS_VISTAS_REGION, _pct_vistas, _texto_inicio_acumulado
 
 
 def test_porcentajes_conocidos():
@@ -15,3 +15,9 @@ def test_extremos():
     assert "ninguna" in _texto_inicio_acumulado(pd.Timestamp("2026-01-10"))
     assert "más tardío que todos" in _texto_inicio_acumulado(pd.Timestamp("2026-04-20"))
     assert "<b>" in _texto_inicio_acumulado(pd.Timestamp("2027-02-28"))  # año no bisiesto
+
+
+def test_pct_vistas_franjas():
+    assert round(_pct_vistas(pd.Timestamp("2026-02-07"))) == 10
+    assert round(_pct_vistas(pd.Timestamp("2026-03-26"))) == 87
+    assert round(_pct_vistas(pd.Timestamp("2026-03-15"))) == 65

@@ -224,12 +224,53 @@ def _texto_muestreo_inicio(meteo: pd.DataFrame, emision: pd.Timestamp, conteos: 
         if not cc.empty and (cc["PLM2"] <= 0).all():
             ult = cc["Fecha"].max()
             partes.append(f"Último conteo en cero: {ult:%d/%m}; el próximo, el {ult + pd.Timedelta(days=7):%d/%m}.")
-    partes.append(_texto_inicio_acumulado(emision, k.get("plantulas_vistas")))
-    partes.append(f"El inicio de la emergencia suele darse entre el <b>{p10:%d/%m} y el {p90:%d/%m}</b> (mediana {med:%d/%m}), pero "
-                  "varía mucho entre años y lotes y el clima no lo anticipa bien: lo que más mejora la alerta es la fecha de las "
-                  "primeras plántulas, que ancla la curva acumulada, el reloj térmico y la ventana del graminicida de barbecho.")
-    return ("<div style='background:#eff6ff;color:#1e3a8a;border:1px solid #bfdbfe;padding:0.75rem 1.1rem;border-radius:0.6rem;"
-            "margin:0.2rem 0 0.8rem 0;font-size:0.98rem'>🗓️ <b>Muestreo hasta el inicio.</b> " + " ".join(partes) + "</div>")
+    return partes, (p10, med, p90)
+
+
+def _pct_vistas(fecha: pd.Timestamp, vistas: list | None = None) -> float:
+    """% de las campañas de la región con primeras plántulas vistas a ``fecha`` (por mes y día)."""
+    v = [tuple(x) for x in (vistas or PLANTULAS_VISTAS_REGION)]
+    return 100.0 * sum(1 for x in v if x <= (fecha.month, fecha.day)) / len(v)
+
+
+def _gauge_inicio(emision: pd.Timestamp, ventana: tuple, vistas: list | None = None) -> go.Figure:
+    """Tacómetro: % de las campañas de la región en que, a la fecha de emisión, ya se habían visto las primeras plántulas.
+    Las franjas marcan antes, durante y después de la ventana habitual del inicio (p10–p90)."""
+    p10, med, p90 = ventana
+    v = _pct_vistas(emision, vistas)
+    a, m, b = (_pct_vistas(x, vistas) for x in (p10, med, p90))
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number", value=round(v), number={"suffix": " %", "font": {"size": 34, "color": "#1e3a8a"}},
+        title={"text": "Campañas con primeras plántulas<br>ya vistas a esta fecha", "font": {"size": 13, "color": "#1e3a8a"}},
+        gauge={"shape": "angular",
+               "axis": {"range": [0, 100], "tickmode": "array", "tickvals": [a, m, b],
+                        "ticktext": [f"{p10:%d/%m}", f"{med:%d/%m}", f"{p90:%d/%m}"],
+                        "tickfont": {"size": 11, "color": "#1e3a8a"}, "tickcolor": "#1e3a8a"},
+               "bar": {"color": "#1e3a8a", "thickness": 0.28},
+               "bgcolor": "white", "borderwidth": 1, "bordercolor": "#bfdbfe",
+               "steps": [{"range": [0, a], "color": "#f1f5f9"}, {"range": [a, b], "color": "#bfdbfe"}, {"range": [b, 100], "color": "#93c5fd"}],
+               "threshold": {"line": {"color": "#1e3a8a", "width": 2}, "thickness": 0.9, "value": m}}))
+    fig.update_layout(height=230, margin=dict(l=28, r=28, t=58, b=6), paper_bgcolor="rgba(0,0,0,0)", font_family="sans-serif")
+    return fig
+
+
+def _mostrar_muestreo_inicio(meteo: pd.DataFrame, emision: pd.Timestamp, conteos: pd.DataFrame | None, modelo) -> None:
+    """Recuadro «Muestreo hasta el inicio»: tacómetro del inicio + qué hacer (recorrer, lluvias, último conteo en cero)."""
+    partes, ventana = _texto_muestreo_inicio(meteo, emision, conteos, modelo)
+    p10, med, p90 = ventana
+    vistas = modelo.p.get("inicio", {}).get("plantulas_vistas")
+    with st.container(border=True):
+        c1, c2 = st.columns([2, 3], vertical_alignment="center")
+        with c1:
+            st.plotly_chart(_gauge_inicio(emision, ventana, vistas), width="stretch", config={"displayModeBar": False},
+                            key=f"alerta_lolmu_gauge_inicio_{emision:%Y%m%d}")
+        with c2:
+            st.markdown("<div style='color:#1e3a8a;font-size:0.98rem'>🗓️ <b>Muestreo hasta el inicio.</b> " + " ".join(partes)
+                        + "</div>", unsafe_allow_html=True)
+            st.caption(f"Ventana habitual del inicio: {p10:%d/%m}–{p90:%d/%m} (mediana {med:%d/%m}; franja celeste del tacómetro). "
+                       f"La barra muestra en qué % de las {len(vistas or PLANTULAS_VISTAS_REGION)} campañas de la región ya se "
+                       "habían visto las primeras plántulas a esta fecha. Varía mucho entre años y el clima no lo anticipa: la fecha "
+                       "de las primeras plántulas es lo que más mejora la alerta.")
 
 
 def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = None, col_fecha: str | None = None,
@@ -525,7 +566,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                               "En lotes con alta infestación, aun una fracción chica puede ser más de 100 plantas/m²."))
     with caja_inicio:
         if r["primeras_plantulas"] is None and emision.month <= 6:
-            st.markdown(_texto_muestreo_inicio(meteo, emision, conteos, modelo), unsafe_allow_html=True)
+            _mostrar_muestreo_inicio(meteo, emision, conteos, modelo)
         elif r["primeras_plantulas"] is None:
             st.info("Sin fecha de primeras plántulas: la alerta usa solo el clima. Cuando aparezcan las primeras plántulas "
                     "en el lote, cargue esa fecha arriba: ancla el reloj térmico de la ventana del graminicida de barbecho y mejora la alerta.")
