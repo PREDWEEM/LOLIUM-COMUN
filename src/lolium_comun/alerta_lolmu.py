@@ -421,11 +421,33 @@ def nivel_de(p: float) -> str:
     return "alerta" if p >= ALERTA else ("atencion" if p >= ATENCION else "baja")
 
 
+def inicio_estimado(dg: pd.Series, primeras_observadas, conteos: pd.DataFrame | None = None,
+                    modelo: AlertaLolmu | None = None) -> pd.Timestamp | None:
+    """Origen de la curva en tiempo térmico: el día en que, contando hacia atrás desde las primeras plántulas observadas, se
+    acumulan los ``tt0`` °Cd de ``curva_tt['forma']`` (la emergencia ya había empezado cuando se vieron).
+
+    Devuelve ``None`` si la curva no tiene origen anterior (``tt0`` = 0) o si hay un conteo en cero antes del primero con
+    plántulas: ese conteo muestra que la emergencia no había empezado y se respeta el dato de campo."""
+    modelo = modelo or AlertaLolmu()
+    tt0 = float(modelo.p.get("curva_tt", {}).get("forma", {}).get("tt0", 0) or 0)
+    if tt0 <= 0 or primeras_observadas is None:
+        return None
+    p = pd.Timestamp(primeras_observadas).normalize()
+    if conteos is not None and not conteos.empty:
+        c = conteos.dropna(subset=["Fecha", "PLM2"])
+        if ((c["PLM2"] == 0) & (c["Fecha"] < p)).any():
+            return None
+    atras = dg[dg.index < p].iloc[::-1].cumsum()
+    if atras.empty or atras.iloc[-1] < tt0:
+        return None
+    return pd.Timestamp(atras.index[int(np.searchsorted(atras.values, tt0))]).normalize()
+
+
 def evaluar(clima_raw: pd.DataFrame, fecha: pd.Timestamp, primeras_plantulas: pd.Timestamp | None = None,
             conteos: pd.DataFrame | None = None, modelo: AlertaLolmu | None = None,
             t_base=2.0, t_opt=20.0, t_crit=30.0, calendario: dict | None = None, agotamiento: dict | None = None,
             tope_sin_inicio: bool = False, cero_reciente_dias: int | None = None,
-            tope_hasta_ultimo_cero: bool = False) -> dict:
+            tope_hasta_ultimo_cero: bool = False, inicio_sin_cero: bool = False) -> dict:
     """Probabilidad de flush para los 7 días posteriores a ``fecha`` con la información disponible.
 
     Opciones por sitio (ambas desactivadas por defecto):
@@ -442,7 +464,11 @@ def evaluar(clima_raw: pd.DataFrame, fecha: pd.Timestamp, primeras_plantulas: pd
         ``fecha`` + 6) terminó a más tardar el día del último conteo en cero anterior a cualquier plántula: el conteo
         confirma que en esa semana no hubo emergencia (por ejemplo, un cero el 15/03 confirma la semana del 9/03 al 15/03). La semana que sigue a un conteo en cero se evalúa normalmente,
         porque un cero no anticipa que no vaya a emerger (en la validación de las 7 localidades, 37 % de las semanas
-        que siguieron a un conteo en cero tuvieron flush).
+        que siguieron a un conteo en cero tuvieron flush);
+      * ``inicio_sin_cero``: si la fecha de primeras plántulas sale de los conteos y no hay un conteo en cero antes del
+        primero con plántulas (se empezó a contar con la emergencia en marcha), el inicio se toma en el origen de la curva
+        en tiempo térmico (``inicio_estimado``), unos 230 °Cd antes. En 14 campañas así, bajó las falsas alarmas de 52 a
+        37 sin cambiar el AUC (0,95). La fecha observada queda en ``primeras_observadas``.
     """
     modelo = modelo or AlertaLolmu()
     clima = limpiar_clima(clima_raw)
@@ -458,9 +484,14 @@ def evaluar(clima_raw: pd.DataFrame, fecha: pd.Timestamp, primeras_plantulas: pd
         cal = modelo.calendario(fecha)
     senales = {"cal": cal, "lluvia": senal_lluvia(suelo, fecha)}
     g1, primer, n_conteos = senal_conteos(conteos, fecha)
+    observadas, origen = primeras_plantulas, None
     if primeras_plantulas is None and conteos is not None and not conteos.empty:
         vistas = conteos[(conteos["PLM2"] > 0) & (conteos["Fecha"] <= fecha)]
-        primeras_plantulas = vistas["Fecha"].min() if not vistas.empty else None
+        primeras_plantulas = observadas = vistas["Fecha"].min() if not vistas.empty else None
+        if inicio_sin_cero and primeras_plantulas is not None:
+            origen = inicio_estimado(dg, primeras_plantulas, conteos, modelo)
+            if origen is not None:
+                primeras_plantulas = origen
     iniciada = primeras_plantulas is not None and pd.Timestamp(primeras_plantulas) <= fecha
     senales["tt_inicio"] = float(dg[(dg.index > pd.Timestamp(primeras_plantulas)) & (dg.index <= fecha)].sum()) if iniciada else 0.0
     senales["g1"], senales["primer"] = g1, primer
@@ -502,7 +533,9 @@ def evaluar(clima_raw: pd.DataFrame, fecha: pd.Timestamp, primeras_plantulas: pd
             "probabilidad_tardia": p_tardia, "umbral_tardia": umbral_tardia(fecha, nivel, modelo),
             "recorrida_tardia": recorrida_tardia(fecha, modelo),
             "cero_reciente": cero_reciente, "senales": senales,
-            "primeras_plantulas": pd.Timestamp(primeras_plantulas) if iniciada else None}
+            "primeras_plantulas": pd.Timestamp(primeras_plantulas) if iniciada else None,
+            "primeras_observadas": pd.Timestamp(observadas) if (iniciada and observadas is not None) else None,
+            "inicio_estimado": origen if iniciada else None}
 
 
 def serie(clima_raw: pd.DataFrame, desde: pd.Timestamp, hasta: pd.Timestamp, primeras_plantulas=None,
