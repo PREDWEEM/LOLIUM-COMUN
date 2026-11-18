@@ -42,3 +42,30 @@ def test_fraccion_inicial_del_calendario_no_cambia():
     # antes salía de curva_tt.media[0] de los parámetros de las apps (0,1797); ahora es un valor propio con el mismo número
     base = json.loads((RAIZ / "tests" / "datos" / "alerta_lolmu_params_bordenave.json").read_text(encoding="utf-8"))
     assert vis.FRACCION_INICIAL_PRIMERAS == base["curva_tt"]["media"][0]
+
+
+def _modelo_weibull(tmp_path, monkeypatch):
+    base = json.loads((RAIZ / "tests" / "datos" / "alerta_lolmu_params_bordenave.json").read_text(encoding="utf-8"))
+    archivo = tmp_path / "p.json"; archivo.write_text(json.dumps(base), encoding="utf-8"); cw.actualizar(archivo)
+    monkeypatch.setenv("LOLIUM_ALERTA_PARAMS", str(archivo))
+    return al.AlertaLolmu()
+
+
+def test_inicio_estimado_sin_cero_previo(tmp_path, monkeypatch):
+    m = _modelo_weibull(tmp_path, monkeypatch)
+    dg = pd.Series(13.0, index=pd.date_range("2026-01-01", "2026-09-30"))  # 13 °Cd por día: 234 °Cd = 18 días
+    c = pd.DataFrame({"Fecha": pd.to_datetime(["2026-04-20", "2026-05-04"]), "PLM2": [400, 100]})
+    assert al.inicio_estimado(dg, pd.Timestamp("2026-04-20"), c, m) == pd.Timestamp("2026-04-02")
+    # con un conteo en cero antes se respeta el dato de campo
+    c0 = pd.concat([pd.DataFrame({"Fecha": [pd.Timestamp("2026-04-10")], "PLM2": [0]}), c])
+    assert al.inicio_estimado(dg, pd.Timestamp("2026-04-20"), c0, m) is None
+
+
+def test_evaluar_usa_inicio_estimado_solo_si_se_pide(tmp_path, monkeypatch):
+    m = _modelo_weibull(tmp_path, monkeypatch)
+    met = pd.read_csv(RAIZ / "tests" / "datos" / "meteo_bordenave_2026.csv")
+    c = pd.DataFrame({"Fecha": pd.to_datetime(["2026-03-02", "2026-03-16"]), "PLM2": [300, 80]})
+    r0 = al.evaluar(met, pd.Timestamp("2026-03-16"), conteos=c, modelo=m)
+    r1 = al.evaluar(met, pd.Timestamp("2026-03-16"), conteos=c, modelo=m, inicio_sin_cero=True)
+    assert r0["primeras_plantulas"] == pd.Timestamp("2026-03-02") and r0["inicio_estimado"] is None
+    assert r1["primeras_observadas"] == pd.Timestamp("2026-03-02") and r1["primeras_plantulas"] == r1["inicio_estimado"] < pd.Timestamp("2026-03-02")

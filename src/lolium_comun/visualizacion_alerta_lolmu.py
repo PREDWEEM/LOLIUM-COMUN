@@ -288,10 +288,14 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                          calendario_en_alerta: bool = False, agotamiento: dict | None = None,
                          tope_sin_inicio: bool = False, cero_reciente_dias: int | None = None, tope_hasta_ultimo_cero: bool = False,
                          curva_desde_ultimo_cero: bool = False, curva_tiempo_termico: bool = False,
-                         curva_desde_primeras: bool = False) -> dict | None:
+                         curva_desde_primeras: bool = False, estimar_inicio: bool = True) -> dict | None:
     """``calendario_local`` (opcional): curva acumulada propia del sitio para el panel de emergencia acumulada, con claves
     ``dia`` (día del año), ``media``, ``bajo``, ``alto`` (fracciones 0–1), ``campanias`` (lista de años) y ``rango``
-    (texto del rango, p. ej. "mínimo–máximo"). La probabilidad de flush sigue usando el calendario de referencia regional."""
+    (texto del rango, p. ej. "mínimo–máximo"). La probabilidad de flush sigue usando el calendario de referencia regional.
+
+    ``estimar_inicio``: si no se cargó la fecha de primeras plántulas y no hay un conteo en cero antes del primero con
+    plántulas, la alerta toma como inicio el origen de la curva en tiempo térmico (``al.inicio_estimado``); la curva acumulada
+    y la ventana del graminicida siguen ancladas en el primer conteo con plántulas."""
     calibrada_aqui = localidad == "Bordenave"
     if calendario_local:
         _d = np.asarray(calendario_local["dia"], float)
@@ -424,7 +428,22 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         opc["cero_reciente_dias"] = int(cero_reciente_dias)
     if tope_hasta_ultimo_cero:
         opc["tope_hasta_ultimo_cero"] = True
-    r = al.evaluar(meteo, emision, primeras, conteos, modelo, **tt, **opc)
+    # la fecha de primeras plántulas viene precargada con el primer conteo con plántulas: si no se cambió, se deja que la
+    # alerta la tome de los conteos (y, sin un cero previo, estime el inicio)
+    primeras_alerta = primeras
+    if estimar_inicio:
+        opc["inicio_sin_cero"] = True
+        if primeras is not None and vistas_conteo is not None and pd.Timestamp(primeras) == pd.Timestamp(vistas_conteo).normalize():
+            primeras_alerta = None
+    r = al.evaluar(meteo, emision, primeras_alerta, conteos, modelo, **tt, **opc)
+    # fecha observada de primeras plántulas (la curva acumulada y la ventana del graminicida se anclan ahí); la alerta puede
+    # usar un inicio estimado anterior si se empezó a contar con la emergencia en marcha
+    prim_obs = r.get("primeras_observadas") or r["primeras_plantulas"]
+    if r.get("inicio_estimado") is not None:
+        st.info(f"Sin un conteo en cero antes del primero con plántulas ({prim_obs:%d/%m}): se empezó a contar con la emergencia en "
+                f"marcha. La alerta toma como inicio el **{r['inicio_estimado']:%d/%m}** (estimado en tiempo térmico, unos "
+                f"{modelo.p['curva_tt']['forma']['tt0']:.0f} °Cd antes); en 14 campañas así bajó las falsas alarmas un 29 %. "
+                "Si conoce la fecha real de las primeras plántulas, cárguela arriba.")
     p, nivel = r["probabilidad"], r["nivel"]
     caja_hacer = st.container()  # «Qué hacer esta semana»: se completa más abajo, con todos los resultados
     hacer = []
@@ -462,7 +481,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     # la ventana de control se ancla solo en las primeras plántulas observadas: ninguna regla climática estimó el inicio con
     # precisión suficiente (error medio de 10–20 días, del orden del ancho de la ventana), así que no se usa un inicio estimado
     # (``inicio_predicho`` se acepta por compatibilidad y se ignora)
-    ancla, ancla_txt = (r["primeras_plantulas"], "primeras plántulas observadas") if r["primeras_plantulas"] is not None else (None, None)
+    ancla, ancla_txt = (prim_obs, "primeras plántulas observadas") if prim_obs is not None else (None, None)
     with caja_alerta:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Probabilidad de gran flujo (7 días)", f"{p:.0%}", help="Tasa histórica: ~25 % de las semanas de campaña."
@@ -650,7 +669,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             st.caption("Guía según el modelo y los datos cargados. Producto y dosis: consultar al asesor y la etiqueta.")
 
     # gráfico único: alerta semanal (arriba) y emergencia acumulada (abajo), con la ventana de control en tiempo térmico
-    s = al.serie(meteo, pd.Timestamp(anio, 2, 2), emision, primeras, conteos, modelo, paso=7, **tt, **opc)
+    s = al.serie(meteo, pd.Timestamp(anio, 2, 2), emision, primeras_alerta, conteos, modelo, paso=7, **tt, **opc)
     if s.empty:  # comienzo de campaña (antes del 2 de febrero): todavía no hay emisiones semanales
         s = pd.DataFrame({"Fecha": pd.DatetimeIndex([]), "probabilidad": pd.Series(dtype=float),
                           "probabilidad_clima": pd.Series(dtype=float), "nivel_info": pd.Series(dtype=int),
@@ -670,7 +689,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     # con fecha de primeras plántulas, la curva acumulada sigue el tiempo térmico desde esa fecha (opción por sitio)
     usa_tt = bool(curva_tiempo_termico and r["primeras_plantulas"] is not None and modelo.p.get("curva_tt"))
     if usa_tt:
-        _prim_tt = pd.Timestamp(r["primeras_plantulas"])
+        _prim_tt = pd.Timestamp(prim_obs)
         _dg_tt = al.tiempo_termico(al.limpiar_clima(meteo))
         _dg_tt = _dg_tt[_dg_tt.index <= ult_tt]  # sin días observados posteriores a la emisión (los completa el clima medio)
 
@@ -817,7 +836,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     usa_prim = bool(curva_desde_primeras and not usa_tt and r["primeras_plantulas"] is not None)
     if usa_prim:
         _base_p = curva_de
-        _p0 = pd.Timestamp(r["primeras_plantulas"])
+        _p0 = pd.Timestamp(prim_obs)
         _f0 = float(modelo.p.get("fraccion_inicial_primeras", FRACCION_INICIAL_PRIMERAS))
 
         def curva_de(fechas, _b=_base_p, _t=_p0, _f=_f0):
@@ -832,8 +851,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     if curva_desde_ultimo_cero and not usa_tt and not usa_prim and conteos is not None and not conteos.empty:
         cc0 = conteos[conteos["Fecha"] <= emision].sort_values("Fecha")
         positivos = cc0[cc0["PLM2"] > 0]["Fecha"]
-        if r["primeras_plantulas"] is not None:
-            positivos = pd.concat([positivos, pd.Series([r["primeras_plantulas"]])])
+        if prim_obs is not None:
+            positivos = pd.concat([positivos, pd.Series([prim_obs])])
         hasta = positivos.min() if not positivos.empty else emision + pd.Timedelta(days=1)
         ceros0 = cc0[(cc0["PLM2"] == 0) & (cc0["Fecha"] < hasta)]["Fecha"]
         t0 = ceros0.max() if not ceros0.empty else None
@@ -858,6 +877,20 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                              line=dict(color="#15803d", width=2.5),
                              customdata=np.c_[100 * cv["p10"], 100 * cv["p90"]],
                              hovertemplate="%{x|%d/%m}: %{y:.0f} % (rango %{customdata[0]:.0f}–%{customdata[1]:.0f} %)<extra></extra>"), row=3, col=1)
+    if usa_tt:
+        # tramo anterior a las primeras plántulas (estimado, punteado): desde el último conteo en cero o, si no lo hay,
+        # desde el origen de la curva; sube en tiempo térmico hasta el valor de la curva al ver las primeras plántulas
+        _cc = conteos[conteos["Fecha"] < _prim_tt] if conteos is not None and not conteos.empty else None
+        _ceros = _cc[_cc["PLM2"] == 0]["Fecha"] if _cc is not None else pd.Series(dtype="datetime64[ns]")
+        _desde = pd.Timestamp(_ceros.max()) if not _ceros.empty else al.inicio_estimado(_dg_tt, _prim_tt, conteos, modelo)
+        if _desde is not None and _desde < _prim_tt:
+            _f = pd.date_range(_desde, _prim_tt)
+            _tt = _dg_tt.reindex(_f).fillna(0).cumsum().values
+            _v0 = float(curva_de(pd.DatetimeIndex([_prim_tt])).iloc[0]["media"])
+            _y = 100 * _v0 * (_tt / _tt[-1] if _tt[-1] > 0 else np.linspace(0, 1, len(_f)))
+            fig.add_trace(go.Scatter(x=_f, y=_y, mode="lines", line=dict(color="#15803d", width=2, dash="dot"),
+                                     name="Antes de las primeras plántulas (estimado)",
+                                     hovertemplate="%{x|%d/%m}: %{y:.0f} % (estimado, antes de ver plántulas)<extra></extra>"), row=3, col=1)
     hoy = curva_de(pd.DatetimeIndex([emision])).iloc[0]
     fig.add_trace(go.Scatter(x=[emision], y=[100 * hoy["media"]], mode="markers+text", marker=dict(size=10, color="#15803d", line=dict(color="white", width=1.5)),
                              text=[f"{100 * hoy['media']:.0f} % ({100 * hoy['p10']:.0f}–{100 * hoy['p90']:.0f} %)"], textposition="middle left",
@@ -945,7 +978,9 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         fmt_f(f_lim_r) + (" (estimada con clima medio)" if f_lim_r is not None and f_lim_r > ult_tt else ""),
         round(100 * hoy["media"], 1), f"{100 * hoy['p10']:.0f}–{100 * hoy['p90']:.0f}",
         round(100 * r["senales"]["cal"], 2), round(100 * r["senales"]["lluvia"], 2),
-        int((conteos["Fecha"] <= emision).sum()) if conteos is not None else 0, fmt_f(r["primeras_plantulas"])]})
+        int((conteos["Fecha"] <= emision).sum()) if conteos is not None else 0,
+        fmt_f(prim_obs) + (f" (la alerta usa como inicio el {r['inicio_estimado']:%d/%m}, estimado: no hubo conteo en cero antes)"
+                           if r.get("inicio_estimado") is not None else "")]})
     if _rp:
         resumen = pd.concat([resumen, pd.DataFrame({"Indicador": [f"Flujos tardíos ({_per_rec})"],
                                                     "Valor": ["recorrer los lotes cada 2 semanas para definir uso de graminicida postemergente"
