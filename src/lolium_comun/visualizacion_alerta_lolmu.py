@@ -25,6 +25,12 @@ DIAS_ACTIVACION = 7  # días desde la aplicación (a la siembra) para que llueva
 INFO = {1: "solo clima (sin datos del lote)", 2: "clima + fecha de primeras plántulas", 3: "clima + primeras plántulas + conteos"}
 
 
+# fracción de la campaña ya emergida, en promedio, al ver las primeras plántulas (campañas de Bordenave). La usan las apps
+# con la curva de calendario anclada a las primeras plántulas; antes salía de ``curva_tt.media[0]``, que con la curva
+# Weibull vale 0, y por eso pasó a ser un valor propio (``fraccion_inicial_primeras`` en los parámetros del sitio).
+FRACCION_INICIAL_PRIMERAS = 0.1797
+
+
 def _ultima_observada(meteo: pd.DataFrame) -> pd.Timestamp:
     m = meteo.copy()
     fechas = pd.to_datetime(m["Fecha"], errors="coerce")
@@ -784,7 +790,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     if usa_prim:
         _base_p = curva_de
         _p0 = pd.Timestamp(r["primeras_plantulas"])
-        _f0 = float(modelo.p.get("curva_tt", {}).get("media", [0.18])[0])
+        _f0 = float(modelo.p.get("fraccion_inicial_primeras", FRACCION_INICIAL_PRIMERAS))
 
         def curva_de(fechas, _b=_base_p, _t=_p0, _f=_f0):
             out = _b(pd.DatetimeIndex(fechas)).copy()
