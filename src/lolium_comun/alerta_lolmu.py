@@ -198,8 +198,8 @@ def riesgo_residual_reciente(siembra, conteos: pd.DataFrame | None, emision=None
                              desde: tuple[int, int] = RECIENTE_DESDE, niveles: dict | None = None) -> dict | None:
     """Riesgo para el residual según las plántulas nacidas en los ``dias`` previos a la siembra (siembras desde ``desde``).
 
-    Usa los conteos ya hechos a la fecha de emisión (``PLM2``: plántulas nuevas por m² en cada conteo) con fecha dentro de los
-    ``dias`` anteriores a la siembra. Si el lote siguió emergiendo antes de sembrar, sigue emergiendo después: es persistencia,
+    Usa los conteos ya hechos a la fecha de emisión (``PLM2``: plántulas nuevas por m² desde el conteo anterior), con la parte de
+    cada intervalo entre conteos que cae dentro de los ``dias`` anteriores a la siembra. Si el lote siguió emergiendo antes de sembrar, sigue emergiendo después: es persistencia,
     no un modelo del clima. Devuelve ``None`` si la siembra es anterior a ``desde`` o no hay conteos en ese período.
     """
     if siembra is None or conteos is None or conteos.empty:
@@ -209,11 +209,18 @@ def riesgo_residual_reciente(siembra, conteos: pd.DataFrame | None, emision=None
         return None
     corte = min(s, pd.Timestamp(emision).normalize()) if emision is not None else s
     ini = s - pd.Timedelta(days=dias)
-    c = conteos.dropna(subset=["Fecha", "PLM2"])
-    c = c[(c["Fecha"] > ini) & (c["Fecha"] <= corte)]
+    c = conteos.dropna(subset=["Fecha", "PLM2"]).sort_values("Fecha").reset_index(drop=True)
+    c = c[c["Fecha"] <= corte].reset_index(drop=True)
+    # cada conteo junta lo que nació desde el conteo anterior (el primero, una semana): se cuenta la parte del intervalo
+    # que cae dentro de los ``dias`` previos a la siembra
+    previo = c["Fecha"].shift(1).fillna(c["Fecha"] - pd.Timedelta(days=7))
+    largo = (c["Fecha"] - previo).dt.days.clip(lower=1)
+    dentro = ((c["Fecha"].clip(upper=corte) - previo.clip(lower=ini)).dt.days).clip(lower=0)
+    peso = (dentro / largo).clip(0, 1)
+    c = c.assign(peso=peso)[peso > 0]
     if c.empty:
         return None
-    plm2 = float(c["PLM2"].sum())
+    plm2 = float((c["PLM2"] * c["peso"]).sum())
     return {"plm2": plm2, "nivel": nivel_residual(plm2, niveles or NIVELES_PLM2), "dias": int(dias), "desde": ini,
             "ultimo_conteo": pd.Timestamp(c["Fecha"].max()), "n_conteos": int(len(c)),
             "completo": bool(pd.Timestamp(c["Fecha"].max()) >= s - pd.Timedelta(days=7))}

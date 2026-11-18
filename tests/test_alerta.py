@@ -84,9 +84,10 @@ def _cont(fechas, plm2):
 
 
 def test_residual_reciente_usa_los_30_dias_previos():
-    c = _cont(["2026-05-20", "2026-06-20", "2026-07-01", "2026-07-08"], [500, 10, 8, 6])
+    c = _cont(["2026-05-20", "2026-06-20", "2026-07-01", "2026-07-08"], [500, 31, 8, 6])
     r = al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), c)
-    assert r["plm2"] == 24 and r["nivel"] == "Alto" and r["n_conteos"] == 3 and r["completo"]
+    # el conteo del 20/06 cubre 31 días (20/05–20/06) y solo 10 caen en los 30 días previos (11/06–10/07): 31 × 10/31 = 10
+    assert abs(r["plm2"] - 24) < 1e-9 and r["nivel"] == "Alto" and r["n_conteos"] == 3 and r["completo"]
 
 
 def test_residual_reciente_solo_conteos_hechos_y_siembras_tardias():
