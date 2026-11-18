@@ -91,10 +91,12 @@ def test_residual_reciente_usa_los_30_dias_previos():
 
 
 def test_residual_reciente_solo_conteos_hechos_y_siembras_tardias():
-    c = _cont(["2026-06-25", "2026-07-08"], [3, 60])
-    # emisión antes del último conteo: solo cuenta lo que ya se sabe
+    c = _cont(["2026-06-18", "2026-06-25", "2026-07-08"], [2, 3, 60])
+    # emisión antes del último conteo: solo cuenta lo que ya se sabe (dos conteos semanales: 14 días cubiertos)
     r = al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), c, emision=pd.Timestamp("2026-07-01"))
-    assert r["plm2"] == 3 and r["nivel"] == "Bajo" and not r["completo"]
+    assert r["plm2"] == 5 and r["nivel"] == "Medio" and r["dias_cubiertos"] == 14 and not r["completo"]
+    # un solo conteo semanal ya hecho cubre 7 de los 30 días: no alcanza, queda el riesgo histórico
+    assert al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), c.iloc[1:], emision=pd.Timestamp("2026-07-01")) is None
     assert al.riesgo_residual_reciente(pd.Timestamp("2026-06-01"), c) is None  # antes del 15/06: riesgo histórico
     assert al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), None) is None
     assert al.riesgo_residual_reciente(pd.Timestamp("2026-09-10"), c) is None  # sin conteos en los 30 días previos
