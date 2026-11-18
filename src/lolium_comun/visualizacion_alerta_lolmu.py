@@ -26,8 +26,9 @@ INFO = {1: "solo clima (sin datos del lote)", 2: "clima + fecha de primeras plá
 
 
 # fracción de la campaña ya emergida, en promedio, al ver las primeras plántulas (campañas de Bordenave). La usan las apps
-# con la curva de calendario anclada a las primeras plántulas; antes salía de ``curva_tt.media[0]``, que con la curva
-# Weibull vale 0, y por eso pasó a ser un valor propio (``fraccion_inicial_primeras`` en los parámetros del sitio).
+# con la curva de calendario anclada a las primeras plántulas; antes salía de ``curva_tt.media[0]`` y pasó a ser un valor
+# propio (``fraccion_inicial_primeras`` en los parámetros del sitio) para no depender de la curva en tiempo térmico, que desde
+# 1.13.0 parte de un valor parecido (15 %) por la misma razón: al ver las primeras plántulas ya nació una parte.
 FRACCION_INICIAL_PRIMERAS = 0.1797
 
 
