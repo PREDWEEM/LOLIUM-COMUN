@@ -76,3 +76,33 @@ def test_infestacion_ordena_el_riesgo():
     niv = [orden.index(al.riesgo_residual(pd.Timestamp("2026-07-01"), infestacion=i)["residual"]["nivel"]) for i in ("Baja", "Media", "Alta")]
     assert niv == sorted(niv)
     assert al.riesgo_residual(pd.Timestamp("2026-06-01"), infestacion=None)["infestacion"] is None
+
+
+# ---- 1.12.0: riesgo del residual con la emergencia de los 30 días previos (siembras desde el 15/06) ----
+def _cont(fechas, plm2):
+    return pd.DataFrame({"Fecha": pd.to_datetime(fechas), "PLM2": plm2})
+
+
+def test_residual_reciente_usa_los_30_dias_previos():
+    c = _cont(["2026-05-20", "2026-06-20", "2026-07-01", "2026-07-08"], [500, 10, 8, 6])
+    r = al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), c)
+    assert r["plm2"] == 24 and r["nivel"] == "Alto" and r["n_conteos"] == 3 and r["completo"]
+
+
+def test_residual_reciente_solo_conteos_hechos_y_siembras_tardias():
+    c = _cont(["2026-06-25", "2026-07-08"], [3, 60])
+    # emisión antes del último conteo: solo cuenta lo que ya se sabe
+    r = al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), c, emision=pd.Timestamp("2026-07-01"))
+    assert r["plm2"] == 3 and r["nivel"] == "Bajo" and not r["completo"]
+    assert al.riesgo_residual_reciente(pd.Timestamp("2026-06-01"), c) is None  # antes del 15/06: riesgo histórico
+    assert al.riesgo_residual_reciente(pd.Timestamp("2026-07-10"), None) is None
+    assert al.riesgo_residual_reciente(pd.Timestamp("2026-09-10"), c) is None  # sin conteos en los 30 días previos
+
+
+def test_con_reciente_conserva_el_historico():
+    rr = al.riesgo_residual(pd.Timestamp("2026-07-15"))
+    rec = al.riesgo_residual_reciente(pd.Timestamp("2026-07-15"), _cont(["2026-07-01", "2026-07-10"], [40, 30]))
+    out = al.con_reciente(rr, rec)
+    assert out["residual"]["nivel"] == "Muy alto" and out["residual"]["nivel_historico"] == rr["residual"]["nivel"]
+    assert out["reciente"] is rec and rr["residual"].get("nivel_historico") is None  # no modifica el original
+    assert al.con_reciente(rr, None) is rr
