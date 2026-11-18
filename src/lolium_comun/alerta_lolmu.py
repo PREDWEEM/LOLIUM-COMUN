@@ -188,6 +188,50 @@ def nivel_residual(fraccion: float, niveles: dict | None = None) -> str:
             "Medio" if fraccion >= n["medio"] else "Bajo")
 
 
+# Siembras desde el 15/06: la tabla histórica no anticipa el año (AUC 0,43 en 38 campañas), pero sí la emergencia de los 30
+# días previos a la siembra (AUC 0,73; con ≥ 20 pl/m², sensibilidad 77 % y especificidad 62 %). Ver ``riesgo_residual_reciente``.
+RECIENTE_DESDE = (6, 15)
+RECIENTE_DIAS = 30
+
+
+def riesgo_residual_reciente(siembra, conteos: pd.DataFrame | None, emision=None, dias: int = RECIENTE_DIAS,
+                             desde: tuple[int, int] = RECIENTE_DESDE, niveles: dict | None = None) -> dict | None:
+    """Riesgo para el residual según las plántulas nacidas en los ``dias`` previos a la siembra (siembras desde ``desde``).
+
+    Usa los conteos ya hechos a la fecha de emisión (``PLM2``: plántulas nuevas por m² en cada conteo) con fecha dentro de los
+    ``dias`` anteriores a la siembra. Si el lote siguió emergiendo antes de sembrar, sigue emergiendo después: es persistencia,
+    no un modelo del clima. Devuelve ``None`` si la siembra es anterior a ``desde`` o no hay conteos en ese período.
+    """
+    if siembra is None or conteos is None or conteos.empty:
+        return None
+    s = pd.Timestamp(siembra).normalize()
+    if (s.month, s.day) < tuple(desde):
+        return None
+    corte = min(s, pd.Timestamp(emision).normalize()) if emision is not None else s
+    ini = s - pd.Timedelta(days=dias)
+    c = conteos.dropna(subset=["Fecha", "PLM2"])
+    c = c[(c["Fecha"] > ini) & (c["Fecha"] <= corte)]
+    if c.empty:
+        return None
+    plm2 = float(c["PLM2"].sum())
+    return {"plm2": plm2, "nivel": nivel_residual(plm2, niveles or NIVELES_PLM2), "dias": int(dias), "desde": ini,
+            "ultimo_conteo": pd.Timestamp(c["Fecha"].max()), "n_conteos": int(len(c)),
+            "completo": bool(pd.Timestamp(c["Fecha"].max()) >= s - pd.Timedelta(days=7))}
+
+
+def con_reciente(rr: dict | None, rec: dict | None) -> dict | None:
+    """Copia de ``riesgo_residual`` con el nivel del residual reemplazado por el de ``riesgo_residual_reciente``.
+
+    El riesgo histórico queda en ``residual['nivel_historico']`` y ``residual['plm2_historico']``."""
+    if rr is None or rec is None:
+        return rr
+    out = dict(rr)
+    res = dict(rr["residual"])
+    res.update(nivel_historico=res["nivel"], plm2_historico=res.get("plm2"), nivel=rec["nivel"])
+    out.update(residual=res, reciente=rec, nivel=rec["nivel"])
+    return out
+
+
 def riesgo_residual(siembra: pd.Timestamp, modelo: "AlertaLolmu | None" = None, infestacion: str | None = None) -> dict | None:
     """Riesgo histórico de nacimientos para el residual y para el post-emergente (``residual`` en los parámetros), siembras 1/05–31/07.
 
