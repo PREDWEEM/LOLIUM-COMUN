@@ -192,15 +192,18 @@ def nivel_residual(fraccion: float, niveles: dict | None = None) -> str:
 # días previos a la siembra (AUC 0,73; con ≥ 20 pl/m², sensibilidad 77 % y especificidad 62 %). Ver ``riesgo_residual_reciente``.
 RECIENTE_DESDE = (6, 15)
 RECIENTE_DIAS = 30
+RECIENTE_MIN_DIAS = 14  # días de la ventana que tienen que cubrir los conteos ya hechos
 
 
 def riesgo_residual_reciente(siembra, conteos: pd.DataFrame | None, emision=None, dias: int = RECIENTE_DIAS,
-                             desde: tuple[int, int] = RECIENTE_DESDE, niveles: dict | None = None) -> dict | None:
+                             desde: tuple[int, int] = RECIENTE_DESDE, niveles: dict | None = None,
+                             min_dias: int = RECIENTE_MIN_DIAS) -> dict | None:
     """Riesgo para el residual según las plántulas nacidas en los ``dias`` previos a la siembra (siembras desde ``desde``).
 
-    Usa los conteos ya hechos a la fecha de emisión (``PLM2``: plántulas nuevas por m² en cada conteo) con fecha dentro de los
-    ``dias`` anteriores a la siembra. Si el lote siguió emergiendo antes de sembrar, sigue emergiendo después: es persistencia,
-    no un modelo del clima. Devuelve ``None`` si la siembra es anterior a ``desde`` o no hay conteos en ese período.
+    Usa los conteos ya hechos a la fecha de emisión (``PLM2``: plántulas nuevas por m² desde el conteo anterior), con la parte de
+    cada intervalo entre conteos que cae dentro de los ``dias`` anteriores a la siembra. Si el lote siguió emergiendo antes de sembrar, sigue emergiendo después: es persistencia,
+    no un modelo del clima. Devuelve ``None`` si la siembra es anterior a ``desde`` o si los conteos ya hechos cubren menos de
+    ``min_dias`` días de ese período (por ejemplo, un único conteo de hace un mes): en ese caso vale el riesgo histórico.
     """
     if siembra is None or conteos is None or conteos.empty:
         return None
@@ -209,12 +212,20 @@ def riesgo_residual_reciente(siembra, conteos: pd.DataFrame | None, emision=None
         return None
     corte = min(s, pd.Timestamp(emision).normalize()) if emision is not None else s
     ini = s - pd.Timedelta(days=dias)
-    c = conteos.dropna(subset=["Fecha", "PLM2"])
-    c = c[(c["Fecha"] > ini) & (c["Fecha"] <= corte)]
-    if c.empty:
+    c = conteos.dropna(subset=["Fecha", "PLM2"]).sort_values("Fecha").reset_index(drop=True)
+    c = c[c["Fecha"] <= corte].reset_index(drop=True)
+    # cada conteo junta lo que nació desde el conteo anterior (el primero, una semana): se cuenta la parte del intervalo
+    # que cae dentro de los ``dias`` previos a la siembra
+    previo = c["Fecha"].shift(1).fillna(c["Fecha"] - pd.Timedelta(days=7))
+    largo = (c["Fecha"] - previo).dt.days.clip(lower=1)
+    dentro = ((c["Fecha"].clip(upper=corte) - previo.clip(lower=ini)).dt.days).clip(lower=0)
+    peso = (dentro / largo).clip(0, 1)
+    c = c.assign(peso=peso, dentro=dentro)[peso > 0]
+    if c.empty or c["dentro"].sum() < min_dias:  # conteos que cubren poco de la ventana: queda el riesgo histórico
         return None
-    plm2 = float(c["PLM2"].sum())
+    plm2 = float((c["PLM2"] * c["peso"]).sum())
     return {"plm2": plm2, "nivel": nivel_residual(plm2, niveles or NIVELES_PLM2), "dias": int(dias), "desde": ini,
+            "dias_cubiertos": int(c["dentro"].sum()),
             "ultimo_conteo": pd.Timestamp(c["Fecha"].max()), "n_conteos": int(len(c)),
             "completo": bool(pd.Timestamp(c["Fecha"].max()) >= s - pd.Timedelta(days=7))}
 
