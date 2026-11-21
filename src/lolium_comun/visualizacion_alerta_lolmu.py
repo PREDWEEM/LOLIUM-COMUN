@@ -567,6 +567,11 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                         f"{_k} [data-testid='stMetricLabel'] *,{_k} [data-testid='stCaptionContainer'],{_k} [data-testid='stCaptionContainer'] *"
                         f"{{color:#1f5b54 !important;opacity:1 !important}}"
                         f"{_k} [data-testid='stAlert'] > div{{background:#fff4c2 !important}}"
+                        # tarjetas: valores y títulos completos (sin «…»), en varias líneas si no entran
+                        f"{_k} [data-testid='stMetricValue'],{_k} [data-testid='stMetricValue'] *,{_k} [data-testid='stMetricLabel'],"
+                        f"{_k} [data-testid='stMetricLabel'] *{{white-space:normal !important;overflow:visible !important;"
+                        f"text-overflow:clip !important;word-break:normal !important;overflow-wrap:normal !important;hyphens:auto}}"
+                        f"{_k} [data-testid='stMetricValue']{{font-size:1.45rem !important;line-height:1.25 !important}}"
                         f"{_k} [data-testid='stAlert'] *{{color:#5c4300 !important}}</style>", unsafe_allow_html=True)
             with st.container(border=True, key="predweem_residual"):
                 _base = ((f"datos de {_r['sitio']}" if _r["fuente"] == "local"
