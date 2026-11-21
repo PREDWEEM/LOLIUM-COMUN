@@ -557,7 +557,23 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                 vv = np.array(list(lo.values()))
                 return f"mediana {fm(np.median(vv))}, entre {fm(vv.min())} y {fm(vv.max())} según la campaña"
 
-            with st.container(border=True):
+            # recuadro destacado en verde azulado, el color de la ventana del residual en el gráfico (texto oscuro fijo: se lee
+            # igual con el tema claro y el oscuro)
+            _k = ".st-key-predweem_residual"
+            st.markdown(f"<style>{_k}{{background:#ccf3ea;border:1px solid #14b8a6 !important;border-left:6px solid {COLOR_VENTANA_RESIDUAL} "
+                        f"!important;border-radius:10px;padding:0.9rem 1.1rem 0.6rem}}"
+                        f"{_k} p,{_k} li,{_k} strong,{_k} span,{_k} label,{_k} [data-testid='stMetricValue'],{_k} [data-testid='stMetricValue'] *"
+                        f"{{color:#0b3b36 !important}}"
+                        f"{_k} [data-testid='stMetricLabel'] *,{_k} [data-testid='stCaptionContainer'],{_k} [data-testid='stCaptionContainer'] *"
+                        f"{{color:#1f5b54 !important;opacity:1 !important}}"
+                        f"{_k} [data-testid='stAlert'] > div{{background:#fff4c2 !important}}"
+                        # tarjetas: valores y títulos completos (sin «…»), en varias líneas si no entran
+                        f"{_k} [data-testid='stMetricValue'],{_k} [data-testid='stMetricValue'] *,{_k} [data-testid='stMetricLabel'],"
+                        f"{_k} [data-testid='stMetricLabel'] *{{white-space:normal !important;overflow:visible !important;"
+                        f"text-overflow:clip !important;word-break:normal !important;overflow-wrap:normal !important;hyphens:auto}}"
+                        f"{_k} [data-testid='stMetricValue']{{font-size:1.45rem !important;line-height:1.25 !important}}"
+                        f"{_k} [data-testid='stAlert'] *{{color:#5c4300 !important}}</style>", unsafe_allow_html=True)
+            with st.container(border=True, key="predweem_residual"):
                 _base = ((f"datos de {_r['sitio']}" if _r["fuente"] == "local"
                           else f"referencia regional: {_r['sitio']} todavía tiene pocos datos")
                          + (f"; infestación {_inf.lower()} del lote" if _inf else ""))
