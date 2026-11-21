@@ -14,6 +14,7 @@ from . import alerta_lolmu as al
 
 COLOR = {"alerta": "#c2410c", "atencion": "#d97706", "baja": "#15803d"}
 COLOR_RESIDUAL = {"Muy alto": "#dc2626", "Alto": "#dc2626", "Medio": "#facc15", "Bajo": "#16a34a"}  # semáforo del residual
+COLOR_VENTANA_RESIDUAL = "#0f766e"  # franja de la ventana de acción del residual (distinta del violeta del graminicida)
 NOMBRE = {"alerta": "Alerta", "atencion": "Atención", "baja": "Sin alerta"}
 TEXTO = {"alerta": "Gran flujo probable en los próximos 7 días: recorrer el lote y preparar el control.",
          "atencion": "Probabilidad de un gran flujo por encima de lo habitual: conviene mirar el lote esta semana.",
@@ -709,6 +710,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     x_fin = max(emision + pd.Timedelta(days=14), pd.Timestamp(anio, 6, 30))
     if siembra is not None:  # que se vea la fecha de siembra prevista
         x_fin = max(x_fin, pd.Timestamp(siembra) + pd.Timedelta(days=10))
+    if modelo.p.get("residual") and rr is not None:  # y la ventana de acción del residual completa
+        x_fin = max(x_fin, rr["siembra"] + pd.Timedelta(days=int(rr["ventana"][1]) + 5))
     if modelo.p.get("residual") and siembra is not None:  # que se vea la fila del residual hasta el fin de la ventana de siembra
         x_fin = max(x_fin, pd.Timestamp(anio, 1, 1) + pd.Timedelta(days=int(modelo.p["residual"]["dia"][-1])))
     if ancla is not None:
@@ -899,6 +902,21 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
     fig.update_yaxes(range=[0, 2], tickvals=[0.5, 1.5], ticktext=["Residual<br>(siembra)" if res_semanas else "", "Grandes flujos<br>(≥ 5 %)"], showgrid=False,
                      zeroline=False, fixedrange=True, row=2, col=1)
     fig.update_yaxes(title_text="% de la campaña", range=[0, 102], row=3, col=1)
+    if modelo.p.get("residual") and rr is not None:
+        # ventana de acción del residual: de 10 días antes a 45 días después de la siembra (la que evalúa el riesgo), en las
+        # tres filas; el rótulo va abajo, en la emergencia acumulada, para no tapar el de la siembra ni el del graminicida
+        _w0 = rr["siembra"] + pd.Timedelta(days=int(rr["ventana"][0]))
+        _w1 = rr["siembra"] + pd.Timedelta(days=int(rr["ventana"][1]))
+        for fila in (1, 2, 3):
+            fig.add_vrect(x0=_w0, x1=_w1, fillcolor=COLOR_VENTANA_RESIDUAL, opacity=0.09,
+                          line=dict(color=COLOR_VENTANA_RESIDUAL, width=1.2, dash="dash"), exclude_empty_subplots=False,
+                          row=fila, col=1)
+        _nv = rr["residual"]["nivel"]
+        fig.add_annotation(x=_w0 + (_w1 - _w0) / 2, y=7, xref="x3", yref="y3", showarrow=False,
+                           font=dict(size=11, color="#134e4a"), bgcolor="rgba(240,253,250,0.92)",
+                           bordercolor=COLOR_VENTANA_RESIDUAL, borderwidth=1, borderpad=3,
+                           text=(f"<b>Ventana de acción del residual</b> ({-rr['ventana'][0]} días antes a {rr['ventana'][1]} después de sembrar)"
+                                 f"<br>{_w0:%d/%m} – {_w1:%d/%m} · riesgo {_nv.lower()}"))
     if siembra is not None:  # fecha de siembra prevista: línea y flecha con cartel
         _fs = pd.Timestamp(siembra)
         for fila in (1, 2, 3):
@@ -935,7 +953,11 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                + (f"La curva arranca el día de las primeras plántulas ({_p0:%d/%m}) en la fracción típica ya emergida al verlas. "
                   if usa_prim else "")
                + "La franja violeta es la ventana del graminicida de barbecho en tiempo térmico desde las primeras plántulas (600–800 °Cd: raigrás de 4 a 6 macollos, con los valores por defecto); el tramo claro con borde "
-               "punteado todavía no se alcanzó con el clima registrado y se estima con el clima medio.")
+               "punteado todavía no se alcanzó con el clima registrado y se estima con el clima medio."
+               + (f" La franja verde azulada con borde de trazos es la ventana de acción del residual para la siembra prevista: de "
+                  f"{-rr['ventana'][0]} días antes a {rr['ventana'][1]} días después de sembrar ({rr['siembra'] + pd.Timedelta(days=int(rr['ventana'][0])):%d/%m}–"
+                  f"{rr['siembra'] + pd.Timedelta(days=int(rr['ventana'][1])):%d/%m}), el período en que el residual tiene que controlar los nacimientos."
+                  if modelo.p.get("residual") and rr is not None else ""))
 
     with st.expander("Cómo se validó esta alerta"):
         if nota_sitio:
@@ -988,10 +1010,11 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                                                               "fuera del período; antes, ver el riesgo para el residual"]})], ignore_index=True)
     if rr is not None:
         resumen = pd.concat([resumen, pd.DataFrame({"Indicador": [
-            "Fecha de siembra prevista", "Infestación de raigrás del lote (densidad usada para pl/m²)",
+            "Fecha de siembra prevista", "Ventana de acción del residual (fechas)", "Infestación de raigrás del lote (densidad usada para pl/m²)",
             f"Riesgo para el residual: nacimientos de {-rr['ventana'][0]} días antes a {rr['ventana'][1]} días después de la siembra (muy alto ≥ 50 pl/m², alto ≥ 20, medio ≥ 5, bajo < 5)",
             "Nacimientos en la ventana del residual: mediana y percentil 90 (pl/m²; % de la campaña)", "Residual a la siembra"],
             "Valor": [fmt_f(rr["siembra"]),
+                      f"{fmt_f(rr['siembra'] + pd.Timedelta(days=int(rr['ventana'][0])))} al {fmt_f(rr['siembra'] + pd.Timedelta(days=int(rr['ventana'][1])))}",
                       (f"{rr['infestacion']} (unas {rr['densidad_lote']:,.0f} pl/m² por campaña)" if rr.get("infestacion") else
                        f"sin dato: densidad del sitio ({rr['densidad_referencia']:,.0f} pl/m² por campaña)").replace(",", "."),
                       rr["residual"]["nivel"],
