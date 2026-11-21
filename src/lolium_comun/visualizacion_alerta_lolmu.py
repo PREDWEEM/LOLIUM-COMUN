@@ -663,7 +663,15 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         _arriba.append("🧪 Cargue la **fecha de siembra prevista** (arriba) para saber si conviene un residual.")
     hacer = _arriba + hacer
     with caja_hacer:
-        with st.container(border=True):
+        # recuadro destacado en amarillo (texto oscuro fijo: se lee igual con el tema claro y el oscuro)
+        st.markdown("<style>.st-key-predweem_que_hacer{background:#fef3c7;border:1px solid #f59e0b !important;"
+                    "border-left:6px solid #d97706 !important;border-radius:10px;padding:0.9rem 1.1rem 0.6rem}"
+                    ".st-key-predweem_que_hacer p,.st-key-predweem_que_hacer li,.st-key-predweem_que_hacer strong,"
+                    ".st-key-predweem_que_hacer span,.st-key-predweem_que_hacer small{color:#3b2a06 !important}"
+                    ".st-key-predweem_que_hacer [data-testid='stCaptionContainer'],"
+                    ".st-key-predweem_que_hacer [data-testid='stCaptionContainer'] *{color:#5c4810 !important;opacity:1 !important}</style>",
+                    unsafe_allow_html=True)
+        with st.container(border=True, key="predweem_que_hacer"):
             st.markdown(f"**📋 Qué hacer esta semana** · {emision:%d/%m/%Y}")
             st.markdown("\n".join(f"- {h}" for h in hacer) if hacer else
                         "- 🟢 Sin acciones previstas esta semana: gran flujo poco probable.")
