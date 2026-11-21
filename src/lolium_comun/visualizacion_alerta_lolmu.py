@@ -828,7 +828,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                       row=1, col=1)
     # emergencia acumulada: curva media y rango 10–90 % de las campañas; marca del valor esperado a la fecha de emisión
     curva_de = _curva or modelo.curva
-    cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 15), x_fin))
+    cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 1), x_fin))
     # conteos en cero antes de las primeras plántulas: la curva queda en 0 hasta la mitad del intervalo entre el último cero
     # y el primer conteo con plántulas (las plántulas de ese conteo salieron en algún momento del intervalo; sin conteo
     # positivo todavía, hasta el último cero) y reparte el resto
@@ -850,7 +850,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                 out[k] = np.where(pd.DatetimeIndex(out["Fecha"]) < _t, 0.0, _f + (1 - _f) * rel)
             return out
 
-        cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 15), x_fin))
+        cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 1), x_fin))
     if curva_desde_ultimo_cero and not usa_tt and not usa_prim and conteos is not None and not conteos.empty:
         cc0 = conteos[conteos["Fecha"] <= emision].sort_values("Fecha")
         positivos = cc0[cc0["PLM2"] > 0]["Fecha"]
@@ -872,7 +872,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                                   np.clip((out[k] - ref[k]) / max(1 - ref[k], 1e-6), 0, 1))
             return out
 
-        cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 15), x_fin))
+        cv = curva_de(pd.date_range(pd.Timestamp(anio, 1, 1), x_fin))
     fig.add_trace(go.Scatter(x=cv["Fecha"], y=100 * cv["p90"], mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=3, col=1)
     fig.add_trace(go.Scatter(x=cv["Fecha"], y=100 * cv["p10"], mode="lines", line=dict(width=0), fill="tonexty",
                              fillcolor="rgba(21,128,61,0.16)", name=f"Rango {rango_txt} de las campañas", hoverinfo="skip"), row=3, col=1)
@@ -925,7 +925,10 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                            arrowcolor="#15803d", ax=0, ay=-42, text=f"<b>🌱 Siembra prevista</b><br>{_fs:%d/%m}",
                            font=dict(size=12, color="#14532d"), bgcolor="rgba(240,253,244,0.95)", bordercolor="#15803d",
                            borderwidth=1.5, borderpad=4)
-    fig.update_xaxes(range=[pd.Timestamp(anio, 2, 1), x_fin], tickformat="%d/%m")
+    # escala desde el 1/01; la alerta semanal se emite desde el 2/02 (período en que se calibró): enero queda con un rótulo
+    fig.add_annotation(x=pd.Timestamp(anio, 1, 16), y=50, xref="x", yref="y", showarrow=False, font=dict(size=11, color="#6b7280"),
+                       text="Alerta semanal<br>desde el 01/02")
+    fig.update_xaxes(range=[pd.Timestamp(anio, 1, 1), x_fin], tickformat="%d/%m")
     fig.update_layout(height=780, margin=dict(t=40, b=10, l=10, r=10), showlegend=False, hovermode="closest",
                       title=dict(text="Alerta de grandes flujos, emergencia acumulada y ventana del graminicida de barbecho", font=dict(size=15)))
     fig.update_annotations(selector=dict(text="Probabilidad de un gran flujo en los próximos 7 días"), font_size=12)
