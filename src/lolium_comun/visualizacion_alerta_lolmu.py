@@ -349,7 +349,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
         c1, c2, c3 = st.columns(3)
         with c1:
             emision = st.date_input(
-                "Fecha de emisión", value=ultima.date(), min_value=min(pd.Timestamp(anio, 2, 1), ultima).date(),
+                "Fecha de emisión", value=ultima.date(), min_value=min(pd.Timestamp(anio, 1, 1), ultima).date(),
                 max_value=ultima.date(), format="DD/MM/YYYY", key="alerta_lolmu_emision",
                 help=f"Por defecto, el último día con clima observado ({ultima:%d/%m/%Y}).")
         with c2:
@@ -670,8 +670,8 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
             st.caption("Guía según el modelo y los datos cargados. Producto y dosis: consultar al asesor y la etiqueta.")
 
     # gráfico único: alerta semanal (arriba) y emergencia acumulada (abajo), con la ventana de control en tiempo térmico
-    s = al.serie(meteo, pd.Timestamp(anio, 2, 2), emision, primeras_alerta, conteos, modelo, paso=7, **tt, **opc)
-    if s.empty:  # comienzo de campaña (antes del 2 de febrero): todavía no hay emisiones semanales
+    s = al.serie(meteo, pd.Timestamp(anio, 1, 1), emision, primeras_alerta, conteos, modelo, paso=7, **tt, **opc)
+    if s.empty:  # comienzo de campaña (primeros días de enero): todavía no hay emisiones semanales
         s = pd.DataFrame({"Fecha": pd.DatetimeIndex([]), "probabilidad": pd.Series(dtype=float),
                           "probabilidad_clima": pd.Series(dtype=float), "nivel_info": pd.Series(dtype=int),
                           "nivel": pd.Series(dtype=str), "cero_reciente": pd.Series(dtype=bool),
@@ -925,9 +925,7 @@ def mostrar_alerta_lolmu(meteo_raw: pd.DataFrame, campo: pd.DataFrame | None = N
                            arrowcolor="#15803d", ax=0, ay=-42, text=f"<b>🌱 Siembra prevista</b><br>{_fs:%d/%m}",
                            font=dict(size=12, color="#14532d"), bgcolor="rgba(240,253,244,0.95)", bordercolor="#15803d",
                            borderwidth=1.5, borderpad=4)
-    # escala desde el 1/01; la alerta semanal se emite desde el 2/02 (período en que se calibró): enero queda con un rótulo
-    fig.add_annotation(x=pd.Timestamp(anio, 1, 16), y=50, xref="x", yref="y", showarrow=False, font=dict(size=11, color="#6b7280"),
-                       text="Alerta semanal<br>desde el 01/02")
+    # escala y alerta semanal desde el 1/01, inicio de la toma de datos de la campaña
     fig.update_xaxes(range=[pd.Timestamp(anio, 1, 1), x_fin], tickformat="%d/%m")
     fig.update_layout(height=780, margin=dict(t=40, b=10, l=10, r=10), showlegend=False, hovermode="closest",
                       title=dict(text="Alerta de grandes flujos, emergencia acumulada y ventana del graminicida de barbecho", font=dict(size=15)))
